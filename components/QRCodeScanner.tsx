@@ -1,0 +1,140 @@
+import React, { useEffect, useRef } from 'react';
+import { Html5Qrcode } from 'html5-qrcode';
+
+interface QRCodeScannerProps {
+  onScan: (code: string) => void;
+  onClose: () => void;
+}
+
+const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onScan, onClose }) => {
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isStartedRef = useRef(false);
+  const containerId = useRef(`qr-reader-${Math.random().toString(36).substr(2, 9)}`).current;
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const startScanner = async () => {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const container = document.getElementById(containerId);
+      if (!container) return;
+
+      container.innerHTML = ''; // Bersihkan container
+
+      try {
+        if (scannerRef.current && isStartedRef.current) {
+          await scannerRef.current.stop();
+          scannerRef.current = null;
+          isStartedRef.current = false;
+        }
+
+        const scanner = new Html5Qrcode(containerId);
+        scannerRef.current = scanner;
+
+        await scanner.start(
+          { facingMode: 'environment' }, // Hanya kamera belakang
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0,
+          },
+          (decodedText) => {
+            if (isMounted) {
+              scanner.stop()
+                .then(() => {
+                  isStartedRef.current = false;
+                  onScan(decodedText);
+                })
+                .catch(console.error);
+            }
+          },
+          () => {} // Abaikan error scanning
+        );
+        isStartedRef.current = true;
+      } catch (err) {
+        console.error('Camera error:', err);
+        if (isMounted) {
+          alert('Tidak dapat mengakses kamera.');
+          onClose();
+        }
+      }
+    };
+
+    startScanner();
+
+    return () => {
+      isMounted = false;
+      if (scannerRef.current && isStartedRef.current) {
+        scannerRef.current.stop().catch(() => {});
+        scannerRef.current = null;
+        isStartedRef.current = false;
+      }
+      const container = document.getElementById(containerId);
+      if (container) container.innerHTML = '';
+    };
+  }, [containerId, onScan, onClose]);
+
+  // CSS untuk memastikan video full dan tidak ada elemen ganda
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.innerHTML = `
+      #${containerId} {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: black;
+      }
+      #${containerId} video {
+        width: 100% !important;
+        height: 100% !important;
+        object-fit: cover !important;
+        position: absolute !important;
+        top: 0;
+        left: 0;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, [containerId]);
+
+  return (
+    <div className="fixed inset-0 bg-black z-50 flex flex-col">
+      {/* Header */}
+      <div className="bg-black p-4 flex justify-between items-center border-b border-white/10">
+        <h3 className="text-white font-bold text-sm">Scan QR Code Kolam</h3>
+        <button onClick={onClose} className="text-white/60 w-8 h-8">
+          <i className="fas fa-times text-xl"></i>
+        </button>
+      </div>
+
+      {/* Area Kamera */}
+      <div className="flex-1 relative">
+        <div id={containerId} className="w-full h-full" />
+        {/* Overlay kotak scan (hanya satu) */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="w-64 h-64 border-2 border-white/70 rounded-2xl" />
+        </div>
+        {/* Teks petunjuk */}
+        <div className="absolute bottom-8 left-0 right-0 text-center pointer-events-none z-10">
+          <p className="text-white/80 text-sm font-medium">Arahkan ke QR Code</p>
+          <p className="text-white/40 text-xs mt-1">Kode akan terbaca otomatis</p>
+        </div>
+      </div>
+
+      {/* Tombol Batal */}
+      <div className="bg-black p-4">
+        <button
+          onClick={onClose}
+          className="w-full py-4 bg-white/10 text-white rounded-xl font-bold text-sm active:bg-white/20"
+        >
+          Batal
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default QRCodeScanner;

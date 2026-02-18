@@ -1,0 +1,8 @@
+{
+  "name": "TambaKita - Smart Aquaculture Management",
+  "description": "A comprehensive pond management app featuring AI-driven diagnostics, smart calculators for FCR and biomass, daily activity logging with voice-to-text, and a hyper-local community forum.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

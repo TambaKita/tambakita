@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TambaKita</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            background-color: #f8fafc;
+        }
+        .safe-bottom {
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        @keyframes float {
+            0% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-10px) rotate(2deg); }
+            100% { transform: translateY(0px) rotate(0deg); }
+        }
+        @keyframes neon-pulse {
+            0%, 100% { filter: drop-shadow(0 0 5px #06b6d4) opacity(1); }
+            50% { filter: drop-shadow(0 0 15px #2563eb) opacity(0.8); }
+        }
+        @keyframes rotate-orbit {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .animate-float {
+            animation: float 4s ease-in-out infinite;
+        }
+        .animate-neon {
+            animation: neon-pulse 3s ease-in-out infinite;
+        }
+        .animate-orbit {
+            animation: rotate-orbit 8s linear infinite;
+        }
+        .logo-gradient {
+            background: linear-gradient(135deg, #2563eb 0%, #06b6d4 100%);
+        }
+        .glass-reflection {
+            background: linear-gradient(180deg, rgba(255,255,255,0.4) 0%, rgba(255,255,255,0) 100%);
+        }
+    </style>
+</head>
+<body class="text-gray-900 overflow-x-hidden">
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+    <script>
+        // HANDLE RELOAD DENGAN HASH
+        (function() {
+            // Jika URL cuma hash doang, redirect ke root
+            if (window.location.href === window.location.origin + '/#' || 
+                window.location.href === window.location.origin + '/#/') {
+                console.log('Redirecting from hash-only URL to root');
+                window.location.href = window.location.origin;
+            }
+        })();
+    </script>
+</body>
+</html>
