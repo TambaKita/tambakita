@@ -8,101 +8,70 @@ interface QRCodeScannerProps {
 
 const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onScan, onClose }) => {
   const scannerRef = useRef<Html5Qrcode | null>(null);
-  const isStartedRef = useRef(false);
-  const containerId = useRef(`qr-reader-${Math.random().toString(36).substr(2, 9)}`).current;
+  const containerId = "qr-scanner-container";
 
   useEffect(() => {
-    let isMounted = true;
+    let isActive = true;
 
-    const startScanner = async () => {
-      await new Promise(resolve => setTimeout(resolve, 100));
+    const initScanner = async () => {
+      // Tunggu DOM siap
+      await new Promise(r => setTimeout(r, 200));
+      
       const container = document.getElementById(containerId);
-      if (!container) return;
+      if (!container || !isActive) return;
 
-      container.innerHTML = ''; // Bersihkan container
+      // Bersihkan container dari sisa render sebelumnya
+      container.innerHTML = '';
 
       try {
-        if (scannerRef.current && isStartedRef.current) {
-          await scannerRef.current.stop();
-          scannerRef.current = null;
-          isStartedRef.current = false;
-        }
-
         const scanner = new Html5Qrcode(containerId);
         scannerRef.current = scanner;
 
         await scanner.start(
-          { facingMode: 'environment' }, // Hanya kamera belakang
+          { facingMode: "environment" },
           {
             fps: 10,
-            qrbox: { width: 250, height: 250 },
+            qrbox: { width: 280, height: 280 },
             aspectRatio: 1.0,
           },
           (decodedText) => {
-            if (isMounted) {
+            if (isActive && scannerRef.current) {
               scanner.stop()
                 .then(() => {
-                  isStartedRef.current = false;
-                  onScan(decodedText);
+                  if (isActive) onScan(decodedText);
                 })
                 .catch(console.error);
+              scannerRef.current = null;
             }
           },
-          () => {} // Abaikan error scanning
+          (error) => {
+            // Abaikan error scan biasa
+          }
         );
-        isStartedRef.current = true;
       } catch (err) {
-        console.error('Camera error:', err);
-        if (isMounted) {
-          alert('Tidak dapat mengakses kamera.');
+        console.error("Camera error:", err);
+        if (isActive) {
+          alert("Tidak dapat mengakses kamera. Pastikan izin kamera diberikan.");
           onClose();
         }
       }
     };
 
-    startScanner();
+    initScanner();
 
     return () => {
-      isMounted = false;
-      if (scannerRef.current && isStartedRef.current) {
+      isActive = false;
+      if (scannerRef.current) {
         scannerRef.current.stop().catch(() => {});
         scannerRef.current = null;
-        isStartedRef.current = false;
       }
       const container = document.getElementById(containerId);
       if (container) container.innerHTML = '';
     };
-  }, [containerId, onScan, onClose]);
-
-  // CSS untuk memastikan video full dan tidak ada elemen ganda
-  useEffect(() => {
-    const style = document.createElement('style');
-    style.innerHTML = `
-      #${containerId} {
-        position: relative;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: black;
-      }
-      #${containerId} video {
-        width: 100% !important;
-        height: 100% !important;
-        object-fit: cover !important;
-        position: absolute !important;
-        top: 0;
-        left: 0;
-      }
-    `;
-    document.head.appendChild(style);
-    return () => {
-      document.head.removeChild(style);
-    };
-  }, [containerId]);
+  }, []); // ⬅️ Kosong! Gak akan re-render ulang
 
   return (
     <div className="fixed inset-0 bg-black z-50 flex flex-col">
-      {/* Header */}
       <div className="bg-black p-4 flex justify-between items-center border-b border-white/10">
         <h3 className="text-white font-bold text-sm">Scan QR Code Kolam</h3>
         <button onClick={onClose} className="text-white/60 w-8 h-8">
@@ -110,21 +79,17 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onScan, onClose }) => {
         </button>
       </div>
 
-      {/* Area Kamera */}
       <div className="flex-1 relative">
         <div id={containerId} className="w-full h-full" />
-        {/* Overlay kotak scan (hanya satu) */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="w-64 h-64 border-2 border-white/70 rounded-2xl" />
         </div>
-        {/* Teks petunjuk */}
         <div className="absolute bottom-8 left-0 right-0 text-center pointer-events-none z-10">
           <p className="text-white/80 text-sm font-medium">Arahkan ke QR Code</p>
           <p className="text-white/40 text-xs mt-1">Kode akan terbaca otomatis</p>
         </div>
       </div>
 
-      {/* Tombol Batal */}
       <div className="bg-black p-4">
         <button
           onClick={onClose}

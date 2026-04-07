@@ -331,38 +331,63 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   };
 
   // Generate kode undangan
-  const handleGenerateCode = async (pondId: string) => {
-    try {
-      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const expiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+const handleGenerateCode = async (pondId: string) => {
+  try {
+    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    
+    // ✅ Ini kunci utamanya - pake UTC biar semua zona waktu konsisten
+    const now = new Date();
+    const expiryUTC = new Date(now.getTime() + (5 * 60 * 1000)); // +5 menit dari sekarang
+    const expiryISO = expiryUTC.toISOString(); // Simpan sebagai UTC
+    const expiryTimestamp = expiryUTC.getTime();
 
-      const { error } = await supabase
-        .from('ponds')
-        .update({ 
-          invite_code: code, 
-          invite_code_expiry: expiry 
-        })
-        .eq('id', pondId);
+    const { error } = await supabase
+      .from('ponds')
+      .update({ 
+        invite_code: code, 
+        invite_code_expiry: expiryISO 
+      })
+      .eq('id', pondId);
 
-      if (error) throw error;
-      fetchPonds();
-      addNotification('Kode undangan berhasil dibuat (berlaku 5 menit)', 'success');
-    } catch (err: any) {
-      addNotification('Gagal generate kode: ' + err.message, 'error');
-    }
-  };
+    if (error) throw error;
+    
+    // Update state lokal
+    setPonds(prevPonds => 
+      prevPonds.map(p => 
+        p.id === pondId 
+          ? { ...p, inviteCode: code, inviteCodeExpiry: expiryTimestamp }
+          : p
+      )
+    );
+    
+    
+    addNotification('Kode undangan berhasil dibuat (berlaku 5 menit)', 'success');
+    
+  } catch (err: any) {
+    addNotification('Gagal generate kode: ' + err.message, 'error');
+  }
+};
 
-  const handleClearCode = async (pondId: string) => {
-    try {
-      await supabase
-        .from('ponds')
-        .update({ invite_code: null, invite_code_expiry: null })
-        .eq('id', pondId);
-      fetchPonds();
-    } catch (err) {
-      console.error(err);
-    }
-  };
+const handleClearCode = async (pondId: string) => {
+  try {
+    await supabase
+      .from('ponds')
+      .update({ invite_code: null, invite_code_expiry: null })
+      .eq('id', pondId);
+    
+    // ✅ Update state lokal juga
+    setPonds(prevPonds => 
+      prevPonds.map(p => 
+        p.id === pondId 
+          ? { ...p, inviteCode: undefined, inviteCodeExpiry: undefined }
+          : p
+      )
+    );
+    
+  } catch (err) {
+    console.error(err);
+  }
+};
 
   const handleAddFeed = async (pondId: string) => {
     if (!newFeedName.trim()) return;

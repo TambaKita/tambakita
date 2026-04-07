@@ -330,43 +330,63 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     }
   };
 
-  // Generate kode undangan (dengan .select() untuk memastikan data kembali)
-  const handleGenerateCode = async (pondId: string) => {
-    try {
-      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const expiry = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  // Generate kode undangan
+const handleGenerateCode = async (pondId: string) => {
+  try {
+    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    
+    // ✅ Paksa pake UTC dengan Z di akhir
+    const expiryDate = new Date();
+    expiryDate.setMinutes(expiryDate.getMinutes() + 5);
+    const expiry = expiryDate.toISOString(); // Hasil: 2026-04-07T10:31:17.008Z
+    const expiryTimestamp = expiryDate.getTime();
 
-      const { data, error } = await supabase
-        .from('ponds')
-        .update({ 
-          invite_code: code, 
-          invite_code_expiry: expiry 
-        })
-        .eq('id', pondId)
-        .select(); // Ambil data yang diupdate
+    const { error } = await supabase
+      .from('ponds')
+      .update({ 
+        invite_code: code, 
+        invite_code_expiry: expiry 
+      })
+      .eq('id', pondId);
 
-      if (error) throw error;
-      
-      console.log('Generate kode sukses, data:', data);
-      await fetchPonds(); // Refresh daftar kolam
-      addNotification('Kode undangan berhasil dibuat (berlaku 5 menit)', 'success');
-    } catch (err: any) {
-      console.error('Error generate kode:', err);
-      addNotification('Gagal generate kode: ' + err.message, 'error');
-    }
-  };
+    if (error) throw error;
+    
+    setPonds(prevPonds => 
+      prevPonds.map(p => 
+        p.id === pondId 
+          ? { ...p, inviteCode: code, inviteCodeExpiry: expiryTimestamp }
+          : p
+      )
+    );
+    
+    
+    addNotification('Kode undangan berhasil dibuat (berlaku 5 menit)', 'success');
+    
+  } catch (err: any) {
+    addNotification('Gagal generate kode: ' + err.message, 'error');
+  }
+};
 
-  const handleClearCode = async (pondId: string) => {
-    try {
-      await supabase
-        .from('ponds')
-        .update({ invite_code: null, invite_code_expiry: null })
-        .eq('id', pondId);
-      fetchPonds();
-    } catch (err) {
-      console.error(err);
-    }
-  };
+const handleClearCode = async (pondId: string) => {
+  try {
+    await supabase
+      .from('ponds')
+      .update({ invite_code: null, invite_code_expiry: null })
+      .eq('id', pondId);
+    
+    // ✅ Update state lokal juga
+    setPonds(prevPonds => 
+      prevPonds.map(p => 
+        p.id === pondId 
+          ? { ...p, inviteCode: undefined, inviteCodeExpiry: undefined }
+          : p
+      )
+    );
+    
+  } catch (err) {
+    console.error(err);
+  }
+};
 
   const handleAddFeed = async (pondId: string) => {
     if (!newFeedName.trim()) return;
@@ -629,21 +649,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                         <div><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Jenis Ikan</p><p className="text-xs font-black text-slate-800">{pond.fishType}</p></div>
                         <div className="text-right"><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Populasi</p><p className="text-xs font-black text-slate-800">{pond.fishCount.toLocaleString()} Ekor</p></div>
                       </div>
- text-rose-600 rounded-lg text-[10px] font-black uppercase active:bg-rose-100">Hapus Kolam Secara Permanen</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex justify-between">
-                        <div><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Jenis Ikan</p><p className="text-xs font-black text-slate-800">{pond.fishType}</p></div>
-                        <div className="text-right"><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Populasi</p><p className="text-xs font-black text-slate-800">{pond.fishCount.toLocaleString()} Ekor</p></div>
-                      </div>
                     )}
-                  </div>
-
-                  {/* Parameter Air */}
-                  <div className="grid grid-cols-4 gap-2">
-                    <div className={`p-2 rounded-xl text-center border transition-colors ${(m.ph < 6.5 || m.ph > 8.5) ? 'bg-rose-600 text-white border-rose-700 shadow-lg animate-pulse' : 'bg-slate-50 text-slate-800 border-transparent'}`}>
-                      <p className                    )}
                   </div>
 
                   {/* Parameter Air */}
@@ -654,18 +660,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                     </div>
                     <div className={`p-2 rounded-xl text-center border transition-colors ${m.temp > 32 ? 'bg-rose-600 text-white border-rose-700 shadow-lg animate-pulse' : 'bg-slate-50 text-slate-800 border-transparent'}`}>
                       <p className="text-[8px] font-black uppercase mb-0.5 opacity-40">Suhu</p>
-                      <p className="text-xs font-black">{m.temp}°</="text-[8px] font-black uppercase mb-0.5 opacity-40">pH</p>
-                      <p className="text-xs font-black">{m.ph}</p>
-                    </div>
-                    <div className={`p-2 rounded-xl text-center border transition-colors ${m.temp > 32 ? 'bg-rose-600 text-white border-rose-700 shadow-lg animate-pulse' : 'bg-slate-50 text-slate-800 border-transparent'}`}>
-                      <p className="text-[8px] font-black uppercase mb-0.5 opacity-40">Suhu</p>
                       <p className="text-xs font-black">{m.temp}°</p>
-                    </div>
-                    <div className={`p-2 rounded-xl text-center border transition-colors ${m.do < 5 ? 'bg-rose-600 text-white border-rose-700 shadow-lg animate-pulse' : 'bg-slate-50 text-slate-800 border-transparent'}`}>
-                      <p className="text-[8px] font-black uppercase mb-0.5 opacity-40">DO</p>
-                      <p className="text-xs font-black">{m.do}</p>
-                    </div>
-                    <div className={`p-2 rounded-xl textp>
                     </div>
                     <div className={`p-2 rounded-xl text-center border transition-colors ${m.do < 5 ? 'bg-rose-600 text-white border-rose-700 shadow-lg animate-pulse' : 'bg-slate-50 text-slate-800 border-transparent'}`}>
                       <p className="text-[8px] font-black uppercase mb-0.5 opacity-40">DO</p>
@@ -681,35 +676,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                   {isOwner && (
                     <div className="p-3 bg-blue-50/50 rounded-2xl space-y-3">
                       <div className="flex justify-between items-center">
--center border transition-colors ${m.ammonia > 0.1 ? 'bg-rose-600 text-white border-rose-700 shadow-lg animate-pulse' : 'bg-slate-50 text-slate-800 border-transparent'}`}>
-                      <p className="text-[8px] font-black uppercase mb-0.5 opacity-40">NH3</p>
-                      <p className="text-xs font-black">{m.ammonia}</p>
-                    </div>
-                  </div>
-
-                  {/* Akses Staf */}
-                  {isOwner && (
-                    <div className="p-3 bg-blue-50/50 rounded-2xl space-y-3">
-                      <div className="flex justify-between items-center">
                         <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest">Akses Staf</span>
-                        <button onClick={() => handleGenerateCode(pond.id)} className="text-[9px] font-black bg-blue-600 text-white px-3 py-1 rounded-full uppercase active:scale-95 transition-all">Generate Kode</button>
-                      </div>
-                      {pond.inviteCode && pond.inviteCodeExpiry && (
-                        <InviteCodeDisplay code={pond.inviteCode} expiry={pond.inviteCodeExpiry} onClear={() => handleClearCode(pond.id)} />
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-};
-
-export default Dashboard                        <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest">Akses Staf</span>
                         <button onClick={() => handleGenerateCode(pond.id)} className="text-[9px] font-black bg-blue-600 text-white px-3 py-1 rounded-full uppercase active:scale-95 transition-all">Generate Kode</button>
                       </div>
                       {pond.inviteCode && pond.inviteCodeExpiry && (
