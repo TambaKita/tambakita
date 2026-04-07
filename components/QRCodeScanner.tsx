@@ -11,45 +11,43 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onScan, onClose }) => {
   const containerId = "qr-reader";
 
   useEffect(() => {
-    // Bersihkan container sebelum mulai
     const container = document.getElementById(containerId);
     if (container) container.innerHTML = '';
 
     const html5QrCode = new Html5Qrcode(containerId);
     scannerRef.current = html5QrCode;
 
+    // Konfigurasi TANPA kotak scan bawaan
     const config = {
       fps: 10,
-      qrbox: { width: 250, height: 250 },
+      qrbox: undefined, // <-- HAPUS KOTAK SCAN BAWAAN
       aspectRatio: 1.0,
+      showTorchButtonForCamera: false,
+      showZoomSlider: false,
     };
 
     html5QrCode.start(
       { facingMode: "environment" },
       config,
       (decodedText) => {
-        // Berhasil scan
         html5QrCode.stop().then(() => {
           onScan(decodedText);
-        }).catch((err) => console.error("Stop error:", err));
+        }).catch(() => {});
       },
-      (errorMessage) => {
-        // Abaikan error scan biasa (bukan error start)
-      }
+      () => {}
     ).catch((err) => {
-      console.error("Start error:", err);
-      alert("Gagal akses kamera. Pastikan izin diberikan.");
+      console.error(err);
+      alert("Gagal akses kamera.");
       onClose();
     });
 
-    // Cleanup: stop scanner saat komponen unmount
     return () => {
       if (scannerRef.current) {
-        scannerRef.current.stop().catch((err) => console.error("Cleanup stop error:", err));
+        scannerRef.current.stop().catch(() => {});
         scannerRef.current = null;
       }
     };
-  }, []); // <-- DEPENDENCY KOSONG! HANYA JALAN SEKALI SAAT MOUNT
+  }, [onScan, onClose]);
 
   return (
     <div className="fixed inset-0 bg-black z-[100]">
@@ -62,6 +60,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onScan, onClose }) => {
 
       <div id={containerId} className="w-full h-full" />
 
+      {/* HANYA 1 KOTAK SCAN (buatan kamu) */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <div className="w-64 h-64 border-2 border-white rounded-2xl" />
       </div>
