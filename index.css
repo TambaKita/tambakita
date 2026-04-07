@@ -28,3 +28,20 @@
   border: none !important;
   box-shadow: none !important;
 }
+
+/* Sembunyikan kotak scan bawaan html5-qrcode */
+#qr-reader__scan_region {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+#qr-reader__scan_region > div:first-child {
+  display: none !important;
+}
+
+/* Pastikan video fullscreen */
+#qr-reader video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}

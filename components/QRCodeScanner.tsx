@@ -17,13 +17,10 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onScan, onClose }) => {
     const html5QrCode = new Html5Qrcode(containerId);
     scannerRef.current = html5QrCode;
 
-    // Konfigurasi TANPA kotak scan bawaan
     const config = {
       fps: 10,
-      qrbox: undefined, // <-- HAPUS KOTAK SCAN BAWAAN
+      qrbox: { width: 250, height: 250 },
       aspectRatio: 1.0,
-      showTorchButtonForCamera: false,
-      showZoomSlider: false,
     };
 
     html5QrCode.start(
@@ -60,7 +57,7 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onScan, onClose }) => {
 
       <div id={containerId} className="w-full h-full" />
 
-      {/* HANYA 1 KOTAK SCAN (buatan kamu) */}
+      {/* Hanya 1 kotak scan - pakai CSS biar gak dobel */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <div className="w-64 h-64 border-2 border-white rounded-2xl" />
       </div>
