@@ -5,42 +5,7 @@
 /* Tambahkan CSS global Anda di sini */
 /* Perbaikan QR Scanner - Rapi dan Fullscreen */
 /* QR Scanner Fullscreen Fix */
-#qr-scanner-container {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  width: 100vw !important;
-  height: 100vh !important;
-  z-index: 9999 !important;
-  background: black !important;
-}
-
 #qr-scanner-container video {
-  width: 100vw !important;
-  height: 100vh !important;
-  object-fit: cover !important;
-}
-
-/* Hilangkan semua border/box-shadow yang gak perlu */
-#qr-scanner-container * {
-  border: none !important;
-  box-shadow: none !important;
-}
-
-/* Sembunyikan kotak scan bawaan html5-qrcode */
-#qr-reader__scan_region {
-  border: none !important;
-  box-shadow: none !important;
-}
-
-#qr-reader__scan_region > div:first-child {
-  display: none !important;
-}
-
-/* Pastikan video fullscreen */
-#qr-reader video {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;

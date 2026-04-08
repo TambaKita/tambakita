@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Pond, User } from '../types';
-import QRCodeScanner from './QRCodeScanner';
 import { supabase } from '../src/lib/supabase';
 
 interface DashboardProps {
   user: User;
 }
 
-// Komponen Notifikasi
+// Komponen Notifikasi (sama)
 const Notification: React.FC<{ 
   message: string; 
   type: 'success' | 'error' | 'warning';
@@ -26,11 +25,10 @@ const Notification: React.FC<{
   );
 };
 
-// Komponen InviteCodeDisplay
+// Komponen InviteCodeDisplay (tanpa QR)
 const InviteCodeDisplay: React.FC<{ code: string; expiry: number; onClear: () => void }> = ({ code, expiry, onClear }) => {
   const [timeLeft, setTimeLeft] = useState(Math.max(0, Math.floor((expiry - Date.now()) / 1000)));
   const [copied, setCopied] = useState(false);
-  const [showQR, setShowQR] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -60,9 +58,6 @@ const InviteCodeDisplay: React.FC<{ code: string; expiry: number; onClear: () =>
           <p className="text-xl font-black text-blue-600 tracking-widest">{code}</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setShowQR(!showQR)} className="w-10 h-10 bg-slate-50 text-slate-500 rounded-xl flex items-center justify-center active:scale-90 transition-all">
-            <i className={`fas ${showQR ? 'fa-code' : 'fa-qrcode'}`}></i>
-          </button>
           <button onClick={handleCopy} className={`w-10 h-10 rounded-xl flex items-center justify-center active:scale-90 transition-all ${copied ? 'bg-emerald-500 text-white' : 'bg-blue-50 text-blue-600'}`}>
             <i className={`fas ${copied ? 'fa-check' : 'fa-copy'}`}></i>
           </button>
@@ -71,14 +66,6 @@ const InviteCodeDisplay: React.FC<{ code: string; expiry: number; onClear: () =>
           </button>
         </div>
       </div>
-      {showQR && (
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 flex flex-col items-center animate-in zoom-in-95">
-          <div className="w-32 h-32 bg-slate-100 rounded-xl flex items-center justify-center mb-3">
-            <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${code}`} alt="Join QR" className="w-24 h-24" />
-          </div>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pindai untuk bergabung</p>
-        </div>
-      )}
     </div>
   );
 };
@@ -107,7 +94,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   const [newPondFish, setNewPondFish] = useState('Nila');
   const [newPondCount, setNewPondCount] = useState('1000');
   const [showJoinPond, setShowJoinPond] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [editingPondId, setEditingPondId] = useState<string | null>(null);
   const [managingMembersId, setManagingMembersId] = useState<string | null>(null);
@@ -117,63 +103,65 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   const [newFeedName, setNewFeedName] = useState('');
 
   // Ambil data kolam dari Supabase
-  const fetchPonds = async () => {
-    try {
-      setLoading(true);
-      console.log('📥 Fetching ponds...');
-      
-      const { data, error } = await supabase
-        .from('ponds')
-        .select('*');
-      
-      if (error) {
-        console.error('❌ Fetch error:', error);
-        throw error;
-      }
-      
-      console.log('📦 Data mentah:', data);
-      
-      if (!data || data.length === 0) {
-        setPonds([]);
-        setLoading(false);
-        return;
-      }
-      
-      // Format data sesuai tipe Pond
-      const formattedPonds: Pond[] = data.map((item: any) => ({
-        id: item.id,
-        name: item.name || '',
-        type: item.type || 'Bioflok',
-        size: item.size || 'D3 (Standard)',
-        ownerId: item.owner_id,
-        ownerName: item.owner_name || '',
-        fishType: item.fish_type || 'Nila',
-        fishCount: item.fish_count || 0,
-        members: item.members || [],
-        customFeeds: item.custom_feeds || ['LP-1', 'LP-2', 'LP-3'],
-        currentMetrics: item.current_metrics || { ph: 7, temp: 28, ammonia: 0, do: 5, lastUpdated: new Date().toISOString() },
-        inviteCode: item.invite_code,
-        inviteCodeExpiry: item.invite_code_expiry ? new Date(item.invite_code_expiry).getTime() : undefined
-      }));
-      
-      console.log('✅ Data terformat:', formattedPonds);
-      
-      setPonds(formattedPonds);
-      
-    } catch (error) {
-      console.error('❌ Error di fetchPonds:', error);
-      addNotification('Gagal memuat data kolam', 'error');
-    } finally {
-      setLoading(false);
+const fetchPonds = async () => {
+  try {
+    setLoading(true);
+    console.log('📥 Fetching ponds...');
+    
+    const { data, error } = await supabase
+      .from('ponds')
+      .select('*');
+    
+    if (error) {
+      console.error('❌ Fetch error:', error);
+      throw error;
     }
-  };
+    
+    console.log('📦 Data mentah:', data);
+    
+    if (!data || data.length === 0) {
+      setPonds([]);
+      setLoading(false);
+      return;
+    }
+    
+    // Format data sesuai tipe Pond
+    const formattedPonds: Pond[] = data.map((item: any) => ({
+      id: item.id,
+      name: item.name || '',
+      type: item.type || 'Bioflok',
+      size: item.size || 'D3 (Standard)',
+      ownerId: item.owner_id,
+      ownerName: item.owner_name || '',
+      fishType: item.fish_type || 'Nila',
+      fishCount: item.fish_count || 0,
+      members: item.members || [],
+      customFeeds: item.custom_feeds || ['LP-1', 'LP-2', 'LP-3'],
+      currentMetrics: item.current_metrics || { ph: 7, temp: 28, ammonia: 0, do: 5, lastUpdated: new Date().toISOString() },
+      inviteCode: item.invite_code,
+      inviteCodeExpiry: item.invite_code_expiry ? new Date(item.invite_code_expiry).getTime() : undefined
+    }));
+    
+    console.log('✅ Data terformat:', formattedPonds);
+    
+    // 🔒 FILTER: Hanya kolam yang user adalah owner atau anggota
+    const myPonds = formattedPonds.filter(p => 
+      p.ownerId === user.id || p.members?.some(m => m.id === user.id)
+    );
+    
+    setPonds(myPonds);
+    
+  } catch (error) {
+    console.error('❌ Error di fetchPonds:', error);
+    addNotification('Gagal memuat data kolam', 'error');
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     fetchPonds();
   }, []);
-
-  // ===== TIDAK ADA LAGI NOTIFIKASI LOKAL UNTUK PARAMETER KRITIS =====
-  // Notifikasi bahaya sekarang dikirim oleh trigger database dan ditampilkan di App
 
   // Tambah kolam
   const handleAddPond = async () => {
@@ -184,7 +172,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     
     try {
       console.log('➕ Menambah kolam...');
-      
       const fishCountNum = parseInt(newPondCount) || 0;
       
       const newPond = {
@@ -278,7 +265,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     }
   };
 
-  // Join kolam
+  // Join kolam (hanya kode manual)
   const handleJoinPond = async () => {
     if (!joinCode) {
       addNotification('Masukkan kode join', 'error');
@@ -330,64 +317,59 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     }
   };
 
-  // Generate kode undangan
-const handleGenerateCode = async (pondId: string) => {
-  try {
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    
-    // ✅ Ini kunci utamanya - pake UTC biar semua zona waktu konsisten
-    const now = new Date();
-    const expiryUTC = new Date(now.getTime() + (5 * 60 * 1000)); // +5 menit dari sekarang
-    const expiryISO = expiryUTC.toISOString(); // Simpan sebagai UTC
-    const expiryTimestamp = expiryUTC.getTime();
+  // Generate kode undangan (tanpa QR code)
+  const handleGenerateCode = async (pondId: string) => {
+    try {
+      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const now = new Date();
+      const expiryUTC = new Date(now.getTime() + (5 * 60 * 1000));
+      const expiryISO = expiryUTC.toISOString();
+      const expiryTimestamp = expiryUTC.getTime();
 
-    const { error } = await supabase
-      .from('ponds')
-      .update({ 
-        invite_code: code, 
-        invite_code_expiry: expiryISO 
-      })
-      .eq('id', pondId);
+      const { error } = await supabase
+        .from('ponds')
+        .update({ 
+          invite_code: code, 
+          invite_code_expiry: expiryISO 
+        })
+        .eq('id', pondId);
 
-    if (error) throw error;
-    
-    // Update state lokal
-    setPonds(prevPonds => 
-      prevPonds.map(p => 
-        p.id === pondId 
-          ? { ...p, inviteCode: code, inviteCodeExpiry: expiryTimestamp }
-          : p
-      )
-    );
-    
-    
-    addNotification('Kode undangan berhasil dibuat (berlaku 5 menit)', 'success');
-    
-  } catch (err: any) {
-    addNotification('Gagal generate kode: ' + err.message, 'error');
-  }
-};
+      if (error) throw error;
+      
+      setPonds(prevPonds => 
+        prevPonds.map(p => 
+          p.id === pondId 
+            ? { ...p, inviteCode: code, inviteCodeExpiry: expiryTimestamp }
+            : p
+        )
+      );
+      
+      addNotification(`Kode: ${code} (berlaku 5 menit)`, 'success');
+      
+    } catch (err: any) {
+      addNotification('Gagal generate kode: ' + err.message, 'error');
+    }
+  };
 
-const handleClearCode = async (pondId: string) => {
-  try {
-    await supabase
-      .from('ponds')
-      .update({ invite_code: null, invite_code_expiry: null })
-      .eq('id', pondId);
-    
-    // ✅ Update state lokal juga
-    setPonds(prevPonds => 
-      prevPonds.map(p => 
-        p.id === pondId 
-          ? { ...p, inviteCode: undefined, inviteCodeExpiry: undefined }
-          : p
-      )
-    );
-    
-  } catch (err) {
-    console.error(err);
-  }
-};
+  const handleClearCode = async (pondId: string) => {
+    try {
+      await supabase
+        .from('ponds')
+        .update({ invite_code: null, invite_code_expiry: null })
+        .eq('id', pondId);
+      
+      setPonds(prevPonds => 
+        prevPonds.map(p => 
+          p.id === pondId 
+            ? { ...p, inviteCode: undefined, inviteCodeExpiry: undefined }
+            : p
+        )
+      );
+      
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const handleAddFeed = async (pondId: string) => {
     if (!newFeedName.trim()) return;
@@ -475,45 +457,29 @@ const handleClearCode = async (pondId: string) => {
         </div>
       </div>
 
-      {/* Form Join */}
+      {/* Form Join (hanya input manual) */}
       {showJoinPond && (
         <div className="bg-white p-6 rounded-[2.5rem] shadow-xl border border-blue-100 space-y-4 animate-in slide-in-from-top-4">
           <div className="flex justify-between items-center mb-2">
             <h3 className="font-black text-slate-800 text-xs uppercase tracking-widest">Gabung Kolam</h3>
-            <button onClick={() => { setShowJoinPond(false); setIsScanning(false); }} className="text-slate-400"><i className="fas fa-times"></i></button>
+            <button onClick={() => setShowJoinPond(false)} className="text-slate-400"><i className="fas fa-times"></i></button>
           </div>
-          
-          {!isScanning ? (
-            <div className="space-y-4">
-              <input 
-                type="text" 
-                value={joinCode} 
-                onChange={e => setJoinCode(e.target.value.toUpperCase())}
-                placeholder="MASUKKAN KODE JOIN" 
-                className="w-full p-4 bg-slate-50 rounded-2xl border-none text-center text-lg font-black tracking-widest outline-none placeholder:text-slate-300 placeholder:tracking-normal" 
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={handleJoinPond} className="py-4 bg-blue-600 text-white rounded-xl font-black text-xs uppercase shadow-lg active:scale-95">Gabung</button>
-                <button onClick={() => setIsScanning(true)} className="py-4 bg-slate-100 text-slate-600 rounded-xl font-black text-xs uppercase flex items-center justify-center gap-2 active:scale-95">
-                  <i className="fas fa-qrcode"></i> Scan QR
-                </button>
-              </div>
-            </div>
-          ) : (
-            <QRCodeScanner
-              key="qr-scanner-unique"
-              onScan={(code) => {
-                setJoinCode(code);
-                setIsScanning(false);
-                setTimeout(() => handleJoinPond(), 500);
-              }}
-              onClose={() => setIsScanning(false)}
+          <div className="space-y-4">
+            <input 
+              type="text" 
+              value={joinCode} 
+              onChange={e => setJoinCode(e.target.value.toUpperCase())}
+              placeholder="MASUKKAN KODE JOIN" 
+              className="w-full p-4 bg-slate-50 rounded-2xl border-none text-center text-lg font-black tracking-widest outline-none placeholder:text-slate-300 placeholder:tracking-normal" 
             />
-          )}
+            <button onClick={handleJoinPond} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black text-xs uppercase shadow-lg active:scale-95">
+              Gabung
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Form Tambah Kolam */}
+      {/* Form Tambah Kolam (sama) */}
       {showAddPond && (
         <div className="bg-white p-5 rounded-[2rem] shadow-xl border border-blue-50 space-y-4 animate-in fade-in">
           <h3 className="font-black text-slate-800 text-xs uppercase tracking-widest">Tambah Kolam</h3>
@@ -535,7 +501,7 @@ const handleClearCode = async (pondId: string) => {
         </div>
       )}
 
-      {/* Daftar Kolam */}
+      {/* Daftar Kolam (sama, hanya bagian Akses Staf yang sudah tidak menampilkan QR) */}
       <div className="space-y-4">
         <h3 className="font-black text-slate-400 px-1 uppercase text-[10px] tracking-[0.2em]">Daftar Kolam</h3>
         {loading ? (
@@ -554,6 +520,7 @@ const handleClearCode = async (pondId: string) => {
             return (
               <div key={pond.id} className={`bg-white rounded-[2rem] shadow-sm border transition-all ${isCritical ? 'border-rose-300 ring-4 ring-rose-50' : 'border-slate-50'}`}>
                 <div className="p-5 space-y-4">
+                  {/* ... (bagian atas sama) */}
                   <div className="flex justify-between items-start">
                     <div className="flex items-center gap-3">
                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner relative overflow-hidden ${isCritical ? 'logo-gradient text-white animate-pulse' : 'logo-gradient text-white opacity-90'}`}>
@@ -673,7 +640,7 @@ const handleClearCode = async (pondId: string) => {
                     </div>
                   </div>
 
-                  {/* Akses Staf */}
+                  {/* Akses Staf (tanpa QR code) */}
                   {isOwner && (
                     <div className="p-3 bg-blue-50/50 rounded-2xl space-y-3">
                       <div className="flex justify-between items-center">

@@ -8,15 +8,14 @@ interface QRCodeScannerProps {
 
 const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onScan, onClose }) => {
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const isRunningRef = useRef(false);
   const containerId = "qr-scanner-container";
 
   useEffect(() => {
     let isActive = true;
 
     const initScanner = async () => {
-      // Tunggu DOM siap
       await new Promise(r => setTimeout(r, 200));
-      
       const container = document.getElementById(containerId);
       if (!container || !isActive) return;
 
@@ -35,23 +34,23 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onScan, onClose }) => {
             aspectRatio: 1.0,
           },
           (decodedText) => {
-            if (isActive && scannerRef.current) {
+            if (isActive && scannerRef.current && isRunningRef.current) {
               scanner.stop()
                 .then(() => {
                   if (isActive) onScan(decodedText);
                 })
                 .catch(console.error);
+              isRunningRef.current = false;
               scannerRef.current = null;
             }
           },
-          (error) => {
-            // Abaikan error scan biasa
-          }
+          () => {} // abaikan error scan
         );
+        isRunningRef.current = true;
       } catch (err) {
         console.error("Camera error:", err);
         if (isActive) {
-          alert("Tidak dapat mengakses kamera. Pastikan izin kamera diberikan.");
+          alert("Tidak dapat mengakses kamera. Pastikan izin kamera diberikan dan tidak ada aplikasi lain yang menggunakan kamera.");
           onClose();
         }
       }
@@ -61,14 +60,15 @@ const QRCodeScanner: React.FC<QRCodeScannerProps> = ({ onScan, onClose }) => {
 
     return () => {
       isActive = false;
-      if (scannerRef.current) {
+      if (scannerRef.current && isRunningRef.current) {
         scannerRef.current.stop().catch(() => {});
         scannerRef.current = null;
+        isRunningRef.current = false;
       }
       const container = document.getElementById(containerId);
       if (container) container.innerHTML = '';
     };
-  }, []); // ⬅️ Kosong! Gak akan re-render ulang
+  }, [onScan, onClose]); // Perhatikan: dependency diisi agar onScan/onClose terbaru
 
   return (
     <div className="fixed inset-0 bg-black z-50 flex flex-col">
