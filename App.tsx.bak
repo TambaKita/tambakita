@@ -7,7 +7,6 @@ import ForumPage from './components/ForumPage';
 import ProfilePage from './components/ProfilePage';
 import MessagesPage from './components/MessagesPage';
 import AuthPage from './components/AuthPage';
-import AuthCallback from './components/AuthCallback';
 import { NavTab, User, Pond, DirectMessage, AppNotification } from './types';
 import { authService } from './services/authService';
 import { supabase } from './src/lib/supabase';
@@ -22,22 +21,8 @@ const App: React.FC = () => {
   const [messages, setMessages] = useState<DirectMessage[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [chatPartner, setChatPartner] = useState<User | null>(null);
-  const [unreadMsgCount, setUnreadMsgCount] = useState(0);
-  const [isAuthCallback, setIsAuthCallback] = useState(false);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  // Cek apakah halaman callback
-  useEffect(() => {
-    if (window.location.pathname.includes('/auth/callback')) {
-      setIsAuthCallback(true);
-    }
-  }, []);
-
-  // Jika halaman callback, tampilkan AuthCallback
-  if (isAuthCallback) {
-    return <AuthCallback />;
-  }
 
   // === AMBIL DATA KOLAM DARI SUPABASE ===
   const fetchPonds = async () => {
@@ -103,33 +88,6 @@ const App: React.FC = () => {
     if (savedDms) setMessages(JSON.parse(savedDms));
   }, [activeTab]);
 
-  // Ambil jumlah pesan belum dibaca dari Supabase
-  useEffect(() => {
-    if (!user) return;
-    
-    const fetchUnreadCount = async () => {
-      const { count, error } = await supabase
-        .from('direct_messages')
-        .select('*', { count: 'exact', head: true })
-        .eq('receiver_id', user.id)
-        .eq('is_read', false);
-      
-      if (!error) setUnreadMsgCount(count || 0);
-    };
-    
-    fetchUnreadCount();
-    
-    const subscription = supabase
-      .channel('direct_messages')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'direct_messages' }, 
-        () => fetchUnreadCount()
-      )
-      .subscribe();
-    
-    return () => subscription.unsubscribe();
-  }, [user]);
-
   // Urgent alerts dari data ponds realtime
   const urgentAlerts = useMemo(() => {
     if (!user) return [];
@@ -193,7 +151,6 @@ const App: React.FC = () => {
         .from('notifications')
         .select('*')
         .eq('user_id', user.id)
-        .neq('type', 'danger')
         .order('created_at', { ascending: false })
         .limit(20);
 
@@ -223,6 +180,11 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [user]);
 
+  const unreadMsgCount = useMemo(
+    () => messages.filter(m => m.receiverId === user?.id && !m.isRead).length,
+    [messages, user]
+  );
+  
   const unreadNotifCount = useMemo(
     () => notifications.filter(n => n.userId === user?.id && !n.isRead).length,
     [notifications, user]
@@ -231,23 +193,6 @@ const App: React.FC = () => {
   const handleOpenChat = (partner: User) => {
     setChatPartner(partner);
     setActiveTab(NavTab.Messages);
-  };
-
-  const hapusNotifYangSudahDibaca = async () => {
-    if (!user) return;
-    
-    const idNotifYangSudahDibaca = notifications
-      .filter(n => n.isRead === true)
-      .map(n => n.id);
-    
-    if (idNotifYangSudahDibaca.length === 0) return;
-    
-    await supabase
-      .from('notifications')
-      .delete()
-      .in('id', idNotifYangSudahDibaca);
-    
-    setNotifications(prev => prev.filter(n => !n.isRead));
   };
 
   const markNotifsAsRead = async () => {
@@ -317,7 +262,7 @@ const App: React.FC = () => {
             <i className="far fa-comment-dots text-xl"></i>
             {unreadMsgCount > 0 && (
               <span className="absolute top-2 right-2 w-5 h-5 bg-blue-600 rounded-full border-2 border-white flex items-center justify-center text-[9px] text-white font-black">
-                {unreadMsgCount > 99 ? '99+' : unreadMsgCount}
+                {unreadMsgCount}
               </span>
             )}
           </button>
@@ -333,7 +278,7 @@ const App: React.FC = () => {
             <i className="far fa-bell text-xl"></i>
             {unreadNotifCount > 0 && (
               <span className="absolute top-2 right-2 w-5 h-5 bg-rose-500 rounded-full border-2 border-white flex items-center justify-center text-[9px] text-white font-black">
-                {unreadNotifCount > 99 ? '99+' : unreadNotifCount}
+                {unreadNotifCount}
               </span>
             )}
           </button>
@@ -434,11 +379,8 @@ const App: React.FC = () => {
             </div>
             <div className="p-4">
               <button
-                onClick={() => {
-                  setShowNotifModal(false);
-                  hapusNotifYangSudahDibaca();
-                }}
-                className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase"
+                onClick={() => setShowNotifModal(false)}
+                className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase active:bg-slate-200"
               >
                 Tutup
               </button>
