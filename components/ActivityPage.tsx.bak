@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User, Pond } from '../types';
 import { supabase } from '../src/lib/supabase';
-import jsPDF from 'jspdf';
 
 interface ActivityPageProps {
   user: User;
@@ -42,7 +41,6 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
 
   // Filter States
   const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
-  const [filterPondId, setFilterPondId] = useState('all');
 
   // Form States
   const [pakanKg, setPakanKg] = useState('');
@@ -60,7 +58,7 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
   const [airAmonia, setAirAmonia] = useState('');
   const [catatanUmum, setCatatanUmum] = useState('');
 
-  // Ambil data kolam (hanya yang user punya akses)
+  // Ambil data kolam
   const fetchPonds = async () => {
     try {
       const { data, error } = await supabase
@@ -82,7 +80,6 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
         currentMetrics: item.current_metrics || { ph: 7, temp: 28, ammonia: 0, do: 5, lastUpdated: new Date().toISOString() }
       }));
 
-      // Filter hanya kolam yang user punya akses (owner atau staff)
       const myPonds = formattedPonds.filter(p => 
         p.members?.some((m: any) => m.id === user.id) || p.ownerId === user.id
       );
@@ -96,31 +93,26 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
     }
   };
 
-  // Ambil riwayat aktivitas dengan filter
+  // Ambil riwayat aktivitas (hanya untuk kolam yang dipilih)
   const fetchActivities = async () => {
-    if (!user) return;
+    if (!user || !selectedPondId) return;
     
     try {
       setLoading(true);
-      console.log('📥 Fetching activities with filter:', { filterDate, filterPondId });
+      console.log('📥 Fetching activities for pond:', selectedPondId);
 
       const startDate = new Date(filterDate);
       startDate.setHours(0, 0, 0, 0);
       const endDate = new Date(filterDate);
       endDate.setHours(23, 59, 59, 999);
 
-      let query = supabase
+      const { data: activities, error: activitiesError } = await supabase
         .from('daily_activities')
         .select('*')
+        .eq('pond_id', selectedPondId)
         .gte('created_at', startDate.toISOString())
         .lte('created_at', endDate.toISOString())
         .order('created_at', { ascending: false });
-
-      if (filterPondId !== 'all') {
-        query = query.eq('pond_id', filterPondId);
-      }
-
-      const { data: activities, error: activitiesError } = await query;
 
       if (activitiesError) throw activitiesError;
 
@@ -131,12 +123,11 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
       if (profilesError) throw profilesError;
 
       const profileMap = new Map(profiles?.map(p => [p.id, p.name]));
-      const pondMap = new Map(ponds.map(p => [p.id, p.name]));
 
       const formattedLogs: ActivityLog[] = (activities || []).map((item: any) => ({
         id: item.id,
         pond_id: item.pond_id,
-        pond_name: pondMap.get(item.pond_id) || 'Kolam Lain',
+        pond_name: ponds.find(p => p.id === item.pond_id)?.name || 'Kolam',
         activity_type: item.activity_type,
         amount: item.amount,
         notes: item.notes,
@@ -188,125 +179,6 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
       await supabase.from('notifications').insert(notifications);
     } catch (error) {
       console.error('Error broadcasting danger:', error);
-    }
-  };
-
-  // Export ke PDF
-  const handleExportPDF = async () => {
-    if (logs.length === 0) {
-      alert('Tidak ada data untuk diekspor!');
-      return;
-    }
-
-    setExporting(true);
-
-    try {
-      const doc = new jsPDF('p', 'mm', 'a4');
-      
-      doc.setFontSize(24);
-      doc.setTextColor(37, 99, 235);
-      doc.text('TambaKita', 20, 25);
-      
-      doc.setFontSize(9);
-      doc.setTextColor(100, 116, 139);
-      doc.text('Smart Aquaculture Management', 20, 33);
-      
-      doc.setDrawColor(37, 99, 235);
-      doc.line(20, 38, 190, 38);
-      
-      doc.setFontSize(11);
-      doc.setTextColor(30, 41, 59);
-      doc.text('Laporan Aktivitas', 20, 50);
-      
-      doc.setFontSize(9);
-      doc.setTextColor(100, 116, 139);
-      
-      let yPos = 60;
-      
-      const selectedPondFilter = ponds.find(p => p.id === filterPondId);
-      if (filterPondId !== 'all' && selectedPondFilter) {
-        doc.text(`Kolam: ${selectedPondFilter.name} (${selectedPondFilter.fishType})`, 20, yPos);
-        yPos += 7;
-      } else {
-        doc.text(`Kolam: Semua Kolam`, 20, yPos);
-        yPos += 7;
-      }
-      
-      doc.text(`Tanggal: ${new Date(filterDate).toLocaleDateString('id-ID')}`, 20, yPos);
-      yPos += 7;
-      doc.text(`Diekspor pada: ${new Date().toLocaleString('id-ID')}`, 20, yPos);
-      yPos += 15;
-      
-      // Header tabel
-      doc.setFillColor(37, 99, 235);
-      doc.setDrawColor(37, 99, 235);
-      doc.rect(20, yPos, 170, 10, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(8);
-      doc.text('Waktu', 25, yPos + 7);
-      doc.text('Aktivitas', 60, yPos + 7);
-      doc.text('Detail', 100, yPos + 7);
-      doc.text('Catatan', 145, yPos + 7);
-      
-      yPos += 10;
-      doc.setTextColor(30, 41, 59);
-      
-      for (const log of logs) {
-        if (yPos > 270) {
-          doc.addPage();
-          yPos = 20;
-        }
-        
-        const waktu = new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-        let aktivitas = '';
-        let detail = '';
-        
-        switch(log.activity_type) {
-          case 'Feeding': 
-            aktivitas = 'Pakan'; 
-            detail = `${log.amount} kg ${log.feed_type || ''}`; 
-            break;
-          case 'Mortality': 
-            aktivitas = 'Kematian'; 
-            detail = `${log.amount} ekor`; 
-            break;
-          case 'Sampling': 
-            aktivitas = 'Sampling'; 
-            detail = `${log.sample_count} ekor, ${log.sample_weight}g, ${log.sample_length}cm`; 
-            break;
-          case 'Medicine': 
-            aktivitas = 'Obat'; 
-            detail = `${log.medicine_name} ${log.dose} ${log.dose_unit}`; 
-            break;
-          case 'WaterParameter': 
-            aktivitas = 'Parameter Air'; 
-            detail = `pH:${log.ph || '-'} Suhu:${log.temperature || '-'}°C DO:${log.dissolved_oxygen || '-'} NH3:${log.ammonia || '-'}`; 
-            break;
-          default: 
-            aktivitas = log.activity_type; 
-            detail = '';
-        }
-        
-        doc.text(waktu, 25, yPos + 4);
-        doc.text(aktivitas, 60, yPos + 4);
-        doc.text(detail.substring(0, 35), 100, yPos + 4);
-        doc.text(log.notes?.substring(0, 25) || '-', 145, yPos + 4);
-        
-        yPos += 8;
-      }
-      
-      doc.setFontSize(7);
-      doc.setTextColor(148, 163, 184);
-      doc.text('TambaKita - Smart Aquaculture Management', 20, 285);
-      doc.text(new Date().toLocaleString('id-ID'), 150, 285);
-      
-      doc.save(`Laporan_Aktivitas_${filterDate}.pdf`);
-      
-    } catch (error) {
-      console.error('Error exporting PDF:', error);
-      alert('Gagal mengekspor PDF: ' + (error as any).message);
-    } finally {
-      setExporting(false);
     }
   };
 
@@ -427,34 +299,117 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
     }
   };
 
+  // Export ke PDF
+  const handleExportPDF = async () => {
+    if (!selectedPond) return;
+    setExporting(true);
+
+    try {
+      const { jsPDF } = await import('jspdf');
+      const doc = new jsPDF('p', 'mm', 'a4');
+      
+      // Logo dan Header
+      doc.setFontSize(24);
+      doc.setTextColor(37, 99, 235);
+      doc.text('TambaKita', 20, 30);
+      
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+      doc.text('Smart Aquaculture Management', 20, 38);
+      
+      doc.setDrawColor(37, 99, 235);
+      doc.line(20, 42, 190, 42);
+      
+      // Info Kolam
+      doc.setFontSize(14);
+      doc.setTextColor(30, 41, 59);
+      doc.text(`Laporan Aktivitas Kolam: ${selectedPond.name}`, 20, 55);
+      
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Jenis Kolam: ${selectedPond.type}`, 20, 63);
+      doc.text(`Jenis Ikan: ${selectedPond.fishType}`, 20, 70);
+      doc.text(`Populasi: ${selectedPond.fishCount.toLocaleString()} ekor`, 20, 77);
+      doc.text(`Tanggal: ${new Date(filterDate).toLocaleDateString('id-ID')}`, 20, 84);
+      
+      // Tabel Aktivitas
+      let yPos = 100;
+      doc.setFontSize(10);
+      doc.setTextColor(30, 41, 59);
+      doc.setFillColor(37, 99, 235);
+      doc.setDrawColor(37, 99, 235);
+      
+      // Header tabel
+      doc.setFillColor(37, 99, 235);
+      doc.rect(20, yPos, 170, 10, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.text('Waktu', 25, yPos + 7);
+      doc.text('Aktivitas', 65, yPos + 7);
+      doc.text('Detail', 110, yPos + 7);
+      doc.text('Catatan', 155, yPos + 7);
+      
+      yPos += 10;
+      doc.setTextColor(30, 41, 59);
+      
+      const filteredLogs = logs.filter(log => 
+        new Date(log.created_at).toDateString() === new Date(filterDate).toDateString()
+      );
+      
+      for (const log of filteredLogs) {
+        if (yPos > 270) {
+          doc.addPage();
+          yPos = 20;
+        }
+        
+        const waktu = new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+        let aktivitas = '';
+        let detail = '';
+        
+        switch(log.activity_type) {
+          case 'Feeding': aktivitas = 'Pakan'; detail = `${log.amount} kg ${log.feed_type}`; break;
+          case 'Mortality': aktivitas = 'Kematian'; detail = `${log.amount} ekor`; break;
+          case 'Sampling': aktivitas = 'Sampling'; detail = `${log.sample_count} ekor, ${log.sample_weight}g, ${log.sample_length}cm`; break;
+          case 'Medicine': aktivitas = 'Obat'; detail = `${log.medicine_name} ${log.dose} ${log.dose_unit}`; break;
+          case 'WaterParameter': aktivitas = 'Parameter Air'; detail = `pH:${log.ph}°C:${log.temperature} DO:${log.dissolved_oxygen} NH3:${log.ammonia}`; break;
+          default: aktivitas = log.activity_type; detail = '';
+        }
+        
+        doc.text(waktu, 25, yPos + 4);
+        doc.text(aktivitas, 65, yPos + 4);
+        doc.text(detail, 110, yPos + 4);
+        doc.text(log.notes?.substring(0, 20) || '-', 155, yPos + 4);
+        
+        yPos += 8;
+      }
+      
+      // Footer
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`Dicetak pada: ${new Date().toLocaleString('id-ID')}`, 20, 285);
+      doc.text('TambaKita - Smart Aquaculture Management', 20, 292);
+      
+      doc.save(`Laporan_Kolam_${selectedPond.name}_${filterDate}.pdf`);
+      
+    } catch (error) {
+      console.error('Error exporting PDF:', error);
+      alert('Gagal export PDF. Pastikan Anda sudah install jspdf: npm install jspdf');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const selectedPond = ponds.find(p => p.id === selectedPondId);
 
+  // Load data
   useEffect(() => {
     fetchPonds();
   }, []);
 
   useEffect(() => {
-    if (ponds.length > 0) {
+    if (selectedPondId) {
       fetchActivities();
     }
-  }, [filterDate, filterPondId, ponds.length]);
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('id-ID', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    }).split('/').join('/');
-  };
-
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('id-ID', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  }, [filterDate, selectedPondId]);
 
   return (
     <div className="p-4 pb-24 space-y-6">
@@ -484,117 +439,119 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
         </button>
       </div>
 
-      {/* Form Aktivitas */}
-      <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-6 rounded-[3rem] text-white shadow-2xl space-y-6 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 blur-3xl"></div>
-        
-        {/* Tab Aktivitas */}
-        <div className="flex overflow-x-auto gap-2 p-1 bg-white/10 rounded-[1.5rem] no-scrollbar">
-          {[
-            { type: 'Feeding', icon: 'fa-cookie-bite', label: 'Pakan' },
-            { type: 'Mortality', icon: 'fa-skull', label: 'Mati' },
-            { type: 'Sampling', icon: 'fa-vial', label: 'Sample' },
-            { type: 'Medicine', icon: 'fa-capsules', label: 'Obat' },
-            { type: 'WaterParameter', icon: 'fa-droplet', label: 'Parameter' }
-          ].map(item => (
-            <button
-              key={item.type}
-              onClick={() => setActiveType(item.type)}
-              className={`flex-1 min-w-[70px] py-4 rounded-[1.2rem] flex flex-col items-center gap-2 transition-all duration-300 ${
-                activeType === item.type ? 'bg-white text-blue-600 shadow-xl' : 'text-white/60 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <i className={`fas ${item.icon} text-sm`}></i>
-              <span className="text-[9px] font-black uppercase tracking-tighter text-center leading-tight">{item.label}</span>
-            </button>
-          ))}
-        </div>
+      {/* Form Aktivitas (hanya tampil jika ada kolam) */}
+      {selectedPond && (
+        <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-6 rounded-[3rem] text-white shadow-2xl space-y-6 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 blur-3xl"></div>
+          
+          {/* Tab Aktivitas */}
+          <div className="flex overflow-x-auto gap-2 p-1 bg-white/10 rounded-[1.5rem] no-scrollbar">
+            {[
+              { type: 'Feeding', icon: 'fa-cookie-bite', label: 'Pakan' },
+              { type: 'Mortality', icon: 'fa-skull', label: 'Mati' },
+              { type: 'Sampling', icon: 'fa-vial', label: 'Sample' },
+              { type: 'Medicine', icon: 'fa-capsules', label: 'Obat' },
+              { type: 'WaterParameter', icon: 'fa-droplet', label: 'Parameter' }
+            ].map(item => (
+              <button
+                key={item.type}
+                onClick={() => setActiveType(item.type)}
+                className={`flex-1 min-w-[70px] py-4 rounded-[1.2rem] flex flex-col items-center gap-2 transition-all duration-300 ${
+                  activeType === item.type ? 'bg-white text-blue-600 shadow-xl' : 'text-white/60 hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <i className={`fas ${item.icon} text-sm`}></i>
+                <span className="text-[9px] font-black uppercase tracking-tighter text-center leading-tight">{item.label}</span>
+              </button>
+            ))}
+          </div>
 
-        {/* Form Input (tanpa voice) */}
-        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
-          {activeType === 'Feeding' && (
-            <div className="grid grid-cols-2 gap-3">
-              <input type="number" value={pakanKg} onChange={e => setPakanKg(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm focus:bg-white/25 outline-none font-bold placeholder-white/50 transition-all" placeholder="Jumlah (Kg)" />
-              <select value={pakanJenis} onChange={e => setPakanJenis(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm focus:bg-white/25 outline-none font-bold text-white">
-                <option value="" className="text-slate-800">Pilih Pakan</option>
-                {(selectedPond?.customFeeds || ['LP-1', 'LP-2', 'LP-3']).map(f => (
-                  <option key={f} value={f} className="text-slate-800">{f}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {activeType === 'Mortality' && (
-            <div className="grid grid-cols-1">
-              <input type="number" value={matiJumlah} onChange={e => setMatiJumlah(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm focus:bg-white/25 outline-none font-bold placeholder-white/50" placeholder="Jumlah Ikan Mati (Ekor)" />
-            </div>
-          )}
-
-          {activeType === 'Sampling' && (
-            <div className="grid grid-cols-3 gap-2">
-              <input type="number" value={sampleJumlah} onChange={e => setSampleJumlah(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Qty" />
-              <input type="number" value={sampleBerat} onChange={e => setSampleBerat(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Gram" />
-              <input type="number" value={samplePanjang} onChange={e => setSamplePanjang(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Cm" />
-            </div>
-          )}
-
-          {activeType === 'Medicine' && (
-            <div className="grid grid-cols-3 gap-2">
-              <input type="text" value={obatNama} onChange={e => setObatNama(e.target.value)} className="col-span-1 bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Nama" />
-              <input type="number" value={obatDosis} onChange={e => setObatDosis(e.target.value)} className="col-span-1 bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Dosis" />
-              <select value={obatSatuan} onChange={e => setObatSatuan(e.target.value)} className="col-span-1 bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold text-white">
-                <option value="Gram" className="text-slate-800">Gram</option>
-                <option value="Ml" className="text-slate-800">Ml</option>
-                <option value="PPM" className="text-slate-800">PPM</option>
-              </select>
-            </div>
-          )}
-
-          {activeType === 'WaterParameter' && (
-            <div className="grid grid-cols-2 gap-2">
-              <div className="relative">
-                <input type="number" step="0.1" value={airPh} onChange={e => setAirPh(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="pH Air" />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] opacity-40 font-black">pH</span>
+          {/* Form Input (tanpa voice) */}
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+            {activeType === 'Feeding' && (
+              <div className="grid grid-cols-2 gap-3">
+                <input type="number" value={pakanKg} onChange={e => setPakanKg(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm focus:bg-white/25 outline-none font-bold placeholder-white/50 transition-all" placeholder="Jumlah (Kg)" />
+                <select value={pakanJenis} onChange={e => setPakanJenis(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm focus:bg-white/25 outline-none font-bold text-white">
+                  <option value="" className="text-slate-800">Pilih Pakan</option>
+                  {(selectedPond?.customFeeds || ['LP-1', 'LP-2', 'LP-3']).map(f => (
+                    <option key={f} value={f} className="text-slate-800">{f}</option>
+                  ))}
+                </select>
               </div>
-              <div className="relative">
-                <input type="number" step="0.1" value={airSuhu} onChange={e => setAirSuhu(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="Suhu" />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] opacity-40 font-black">°C</span>
-              </div>
-              <div className="relative">
-                <input type="number" step="0.1" value={airDo} onChange={e => setAirDo(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="DO" />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] opacity-40 font-black">mg/L</span>
-              </div>
-              <div className="relative">
-                <input type="number" step="0.01" value={airAmonia} onChange={e => setAirAmonia(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="NH3" />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] opacity-40 font-black">ppm</span>
-              </div>
-            </div>
-          )}
-
-          {/* Catatan (tanpa voice) */}
-          <textarea 
-            value={catatanUmum} 
-            onChange={e => setCatatanUmum(e.target.value)} 
-            className="w-full bg-white/15 border-none rounded-[1.8rem] p-5 text-sm focus:bg-white/25 outline-none font-bold h-24 placeholder-white/50 transition-all" 
-            placeholder="Catatan tambahan..." 
-          />
-
-          {/* Tombol Simpan */}
-          <button 
-            onClick={handleSaveLog}
-            disabled={submitting}
-            className="w-full py-5 bg-white text-blue-700 rounded-[1.8rem] font-black text-lg shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-70"
-          >
-            {submitting ? (
-              <div className="w-5 h-5 border-3 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></div>
-            ) : (
-              <>
-                <i className="fas fa-check-circle"></i> Simpan Catatan
-              </>
             )}
-          </button>
+
+            {activeType === 'Mortality' && (
+              <div className="grid grid-cols-1">
+                <input type="number" value={matiJumlah} onChange={e => setMatiJumlah(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm focus:bg-white/25 outline-none font-bold placeholder-white/50" placeholder="Jumlah Ikan Mati (Ekor)" />
+              </div>
+            )}
+
+            {activeType === 'Sampling' && (
+              <div className="grid grid-cols-3 gap-2">
+                <input type="number" value={sampleJumlah} onChange={e => setSampleJumlah(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Qty" />
+                <input type="number" value={sampleBerat} onChange={e => setSampleBerat(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Gram" />
+                <input type="number" value={samplePanjang} onChange={e => setSamplePanjang(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Cm" />
+              </div>
+            )}
+
+            {activeType === 'Medicine' && (
+              <div className="grid grid-cols-3 gap-2">
+                <input type="text" value={obatNama} onChange={e => setObatNama(e.target.value)} className="col-span-1 bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Nama" />
+                <input type="number" value={obatDosis} onChange={e => setObatDosis(e.target.value)} className="col-span-1 bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Dosis" />
+                <select value={obatSatuan} onChange={e => setObatSatuan(e.target.value)} className="col-span-1 bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold text-white">
+                  <option value="Gram" className="text-slate-800">Gram</option>
+                  <option value="Ml" className="text-slate-800">Ml</option>
+                  <option value="PPM" className="text-slate-800">PPM</option>
+                </select>
+              </div>
+            )}
+
+            {activeType === 'WaterParameter' && (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="relative">
+                  <input type="number" step="0.1" value={airPh} onChange={e => setAirPh(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="pH Air" />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] opacity-40 font-black">pH</span>
+                </div>
+                <div className="relative">
+                  <input type="number" step="0.1" value={airSuhu} onChange={e => setAirSuhu(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="Suhu" />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] opacity-40 font-black">°C</span>
+                </div>
+                <div className="relative">
+                  <input type="number" step="0.1" value={airDo} onChange={e => setAirDo(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="DO" />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] opacity-40 font-black">mg/L</span>
+                </div>
+                <div className="relative">
+                  <input type="number" step="0.01" value={airAmonia} onChange={e => setAirAmonia(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="NH3" />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] opacity-40 font-black">ppm</span>
+                </div>
+              </div>
+            )}
+
+            {/* Catatan (tanpa voice) */}
+            <textarea 
+              value={catatanUmum} 
+              onChange={e => setCatatanUmum(e.target.value)} 
+              className="w-full bg-white/15 border-none rounded-[1.8rem] p-5 text-sm focus:bg-white/25 outline-none font-bold h-24 placeholder-white/50 transition-all" 
+              placeholder="Catatan tambahan..." 
+            />
+
+            {/* Tombol Simpan */}
+            <button 
+              onClick={handleSaveLog}
+              disabled={submitting}
+              className="w-full py-5 bg-white text-blue-700 rounded-[1.8rem] font-black text-lg shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-70"
+            >
+              {submitting ? (
+                <div className="w-5 h-5 border-3 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></div>
+              ) : (
+                <>
+                  <i className="fas fa-check-circle"></i> Simpan Catatan
+                </>
+              )}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Riwayat Aktivitas */}
       <div className="space-y-4">
@@ -608,26 +565,23 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
           </button>
         </div>
         
-        {/* Filter */}
-        <div className="grid grid-cols-2 gap-2 px-1">
+        {/* Filter Tanggal */}
+        <div className="px-1">
           <input 
             type="date" 
             value={filterDate} 
             onChange={e => setFilterDate(e.target.value)}
-            className="p-3 bg-white rounded-xl border border-slate-100 text-[10px] font-black text-slate-700 outline-none"
+            className="w-full p-3 bg-white rounded-xl border border-slate-100 text-[10px] font-black text-slate-700 outline-none"
           />
-          <select 
-            value={filterPondId}
-            onChange={e => setFilterPondId(e.target.value)}
-            className="p-3 bg-white rounded-xl border border-slate-100 text-[10px] font-black text-slate-700 outline-none"
-          >
-            <option value="all">Semua Kolam</option>
-            {ponds.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
         </div>
 
         {/* List Aktivitas */}
-        {loading ? (
+        {!selectedPondId ? (
+          <div className="bg-white p-12 rounded-[2.5rem] border border-slate-100 text-center">
+            <i className="fas fa-water text-4xl text-slate-100 mb-4"></i>
+            <p className="text-slate-300 font-bold text-xs uppercase tracking-widest">Pilih kolam terlebih dahulu.</p>
+          </div>
+        ) : loading ? (
           <div className="text-center py-10">
             <div className="w-10 h-10 border-4 border-blue-600/30 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
             <p className="text-slate-400 font-bold text-xs uppercase tracking-widest">Memuat catatan...</p>
@@ -661,7 +615,7 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
                         </span>
                       </p>
                       <p className="text-[8px] font-bold text-slate-400 mt-0.5">
-                        {formatTime(log.created_at)} • {formatDate(log.created_at)}
+                        {new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} • {new Date(log.created_at).toLocaleDateString('id-ID')}
                       </p>
                     </div>
                     <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-full">

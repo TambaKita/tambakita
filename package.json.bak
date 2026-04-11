@@ -1,8 +1,8 @@
 {
   "name": "tambakita---smart-aquaculture-management",
-  "homepage": "https://TambaKita.github.io/tambakita",
+  "homepage": "https://USERNAME_GITHUB_ANDA.github.io/tambakita",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
