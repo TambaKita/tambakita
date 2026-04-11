@@ -76,16 +76,31 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
     }
   }, [selectedDistrict]);
 
-  // ===== HANDLE GOOGLE LOGIN =====
+  // ===== HANDLE GOOGLE LOGIN (DIPERBAIKI) =====
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
       setError('');
       
+      // Deteksi apakah berjalan di aplikasi Android (custom WebView) atau browser biasa
+      const userAgent = navigator.userAgent;
+      const isInApp = /Android/i.test(userAgent) && 
+                      !/Chrome/i.test(userAgent) &&
+                      /WebView|wv/i.test(userAgent);
+      
+      let redirectUrl;
+      if (isInApp) {
+        // Jika di aplikasi TambaKita, gunakan custom scheme untuk balik ke aplikasi
+        redirectUrl = "tambakita://callback";
+      } else {
+        // Jika di browser web biasa
+        redirectUrl = window.location.origin;
+      }
+      
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin
+          redirectTo: redirectUrl
         }
       });
       
