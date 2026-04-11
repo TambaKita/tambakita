@@ -103,61 +103,54 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   const [newFeedName, setNewFeedName] = useState('');
 
   // Ambil data kolam dari Supabase
-const fetchPonds = async () => {
-  try {
-    setLoading(true);
-    console.log('📥 Fetching ponds...');
-    
-    const { data, error } = await supabase
-      .from('ponds')
-      .select('*');
-    
-    if (error) {
-      console.error('❌ Fetch error:', error);
-      throw error;
-    }
-    
-    console.log('📦 Data mentah:', data);
-    
-    if (!data || data.length === 0) {
-      setPonds([]);
+  const fetchPonds = async () => {
+    try {
+      setLoading(true);
+      console.log('📥 Fetching ponds...');
+      
+      const { data, error } = await supabase
+        .from('ponds')
+        .select('*');
+      
+      if (error) {
+        console.error('❌ Fetch error:', error);
+        throw error;
+      }
+      
+      console.log('📦 Data mentah:', data);
+      
+      if (!data || data.length === 0) {
+        setPonds([]);
+        setLoading(false);
+        return;
+      }
+      
+      const formattedPonds: Pond[] = data.map((item: any) => ({
+        id: item.id,
+        name: item.name || '',
+        type: item.type || 'Bioflok',
+        size: item.size || 'D3 (Standard)',
+        ownerId: item.owner_id,
+        ownerName: item.owner_name || '',
+        fishType: item.fish_type || 'Nila',
+        fishCount: item.fish_count || 0,
+        members: item.members || [],
+        customFeeds: item.custom_feeds || ['LP-1', 'LP-2', 'LP-3'],
+        currentMetrics: item.current_metrics || { ph: 7, temp: 28, ammonia: 0, do: 5, lastUpdated: new Date().toISOString() },
+        inviteCode: item.invite_code,
+        inviteCodeExpiry: item.invite_code_expiry ? new Date(item.invite_code_expiry).getTime() : undefined
+      }));
+      
+      console.log('✅ Data terformat:', formattedPonds);
+      setPonds(formattedPonds);
+      
+    } catch (error) {
+      console.error('❌ Error di fetchPonds:', error);
+      addNotification('Gagal memuat data kolam', 'error');
+    } finally {
       setLoading(false);
-      return;
     }
-    
-    // Format data sesuai tipe Pond
-    const formattedPonds: Pond[] = data.map((item: any) => ({
-      id: item.id,
-      name: item.name || '',
-      type: item.type || 'Bioflok',
-      size: item.size || 'D3 (Standard)',
-      ownerId: item.owner_id,
-      ownerName: item.owner_name || '',
-      fishType: item.fish_type || 'Nila',
-      fishCount: item.fish_count || 0,
-      members: item.members || [],
-      customFeeds: item.custom_feeds || ['LP-1', 'LP-2', 'LP-3'],
-      currentMetrics: item.current_metrics || { ph: 7, temp: 28, ammonia: 0, do: 5, lastUpdated: new Date().toISOString() },
-      inviteCode: item.invite_code,
-      inviteCodeExpiry: item.invite_code_expiry ? new Date(item.invite_code_expiry).getTime() : undefined
-    }));
-    
-    console.log('✅ Data terformat:', formattedPonds);
-    
-    // 🔒 FILTER: Hanya kolam yang user adalah owner atau anggota
-    const myPonds = formattedPonds.filter(p => 
-      p.ownerId === user.id || p.members?.some(m => m.id === user.id)
-    );
-    
-    setPonds(myPonds);
-    
-  } catch (error) {
-    console.error('❌ Error di fetchPonds:', error);
-    addNotification('Gagal memuat data kolam', 'error');
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   useEffect(() => {
     fetchPonds();
