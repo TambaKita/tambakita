@@ -77,35 +77,36 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
 
   // Handle Google Login dengan deteksi WebView APK
   const handleGoogleLogin = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      
-      // Deteksi apakah di WebView APK
-      const userAgent = navigator.userAgent;
-      const isWebView = /Android/i.test(userAgent) && 
-                        !/Chrome/i.test(userAgent) &&
-                        /WebView|wv/i.test(userAgent);
-      
-      // Pilih redirect URL berdasarkan environment
-      let redirectUrl;
-      if (isWebView) {
-        // Untuk APK WebView - pakai custom scheme yang sudah di intent filter
-        redirectUrl = "tambakita://callback";
-      } else {
-        // Untuk browser biasa
-        redirectUrl = `${window.location.origin}/auth/callback`;
+  try {
+    setLoading(true);
+    setError('');
+    
+    // Deteksi apakah di WebView APK
+    const userAgent = navigator.userAgent;
+    const isWebView = /Android/i.test(userAgent) && 
+                      !/Chrome/i.test(userAgent) &&
+                      /WebView|wv/i.test(userAgent);
+    
+    // PAKAI HTTPS DOMAIN UNTUK SEMUA (lebih reliable)
+    const redirectUrl = "https://TambaKita.github.io/tambakita/auth/callback";
+    
+    console.log("Redirect URL:", redirectUrl);
+    console.log("Is WebView:", isWebView);
+    
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: redirectUrl
       }
-      
-      console.log("Redirect URL:", redirectUrl);
-      console.log("Is WebView:", isWebView);
-      
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: redirectUrl
-        }
-      });
+    });
+    
+    if (error) throw error;
+    
+  } catch (err: any) {
+    setError(err.message);
+    setLoading(false);
+  }
+};
       
       if (error) throw error;
       
