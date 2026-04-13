@@ -28,16 +28,19 @@ const App: React.FC = () => {
     const hash = window.location.hash;
     const search = window.location.search;
     
+    console.log('🔍 Path:', pathname);
+    console.log('🔍 Hash:', hash);
+    console.log('🔍 Search:', search);
+    
     if (pathname.includes('/auth/callback')) {
       setIsAuthCallback(true);
     }
     
-    // Cek untuk reset password - lebih lengkap
-    const isRecovery = hash.includes('type=recovery') || 
-                       search.includes('type=recovery') ||
-                       (hash.includes('access_token') && pathname === '/');
-    
-    if (isRecovery) {
+    // CEK RESET PASSWORD - DARI HASH ATAU SEARCH
+    if (hash.includes('type=recovery') || 
+        hash.includes('access_token') || 
+        search.includes('type=recovery')) {
+      console.log('✅ Reset password detected!');
       setIsResetPassword(true);
     }
   }, []);
