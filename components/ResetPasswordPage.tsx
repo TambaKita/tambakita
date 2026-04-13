@@ -11,31 +11,20 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onPasswordReset }
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    // Ambil token dari URL hash
-    const hash = window.location.hash;
-    if (hash && hash.includes('access_token=')) {
-      const match = hash.match(/access_token=([^&]+)/);
-      if (match) {
-        setToken(match[1]);
-        console.log('Token ditemukan');
-      } else {
-        setError('Token tidak valid. Silakan minta link baru.');
+    console.log('ResetPasswordPage mounted');
+    // Cek session
+    supabase.auth.getSession().then(({ data }) => {
+      console.log('Session:', data.session);
+      if (!data.session) {
+        setError('Session tidak ditemukan. Silakan minta link reset password baru.');
       }
-    } else {
-      setError('Link reset password tidak valid.');
-    }
+    });
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!token) {
-      setError('Token tidak ditemukan. Silakan minta link baru.');
-      return;
-    }
     
     if (password !== confirmPassword) {
       setError('Password tidak cocok');
@@ -52,7 +41,6 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onPasswordReset }
     setMessage('');
 
     try {
-      // Update password pakai token dari URL
       const { error } = await supabase.auth.updateUser({ 
         password: password 
       });
@@ -67,11 +55,24 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onPasswordReset }
       
     } catch (err: any) {
       console.error('Reset password error:', err);
-      setError(err.message || 'Gagal reset password. Mungkin link sudah kadaluarsa.');
+      setError(err.message || 'Gagal reset password');
     } finally {
       setLoading(false);
     }
   };
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-600 to-blue-800">
+        <div className="w-full max-w-md bg-white rounded-3xl p-8 shadow-2xl text-center">
+          <div className="text-red-600 text-6xl mb-4">⚠️</div>
+          <h1 className="text-xl font-black text-slate-800 mb-2">Error</h1>
+          <p className="text-slate-600 mb-6">{error}</p>
+          <a href="/tambakita/" className="text-blue-600 font-bold">← Kembali ke Login</a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-600 to-blue-800">
@@ -112,12 +113,6 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onPasswordReset }
               required
             />
           </div>
-
-          {error && (
-            <div className="p-4 bg-red-50 text-red-600 text-sm rounded-2xl font-bold text-center border border-red-100">
-              {error}
-            </div>
-          )}
 
           {message && (
             <div className="p-4 bg-emerald-50 text-emerald-600 text-sm rounded-2xl font-bold text-center border border-emerald-100">
