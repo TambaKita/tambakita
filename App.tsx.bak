@@ -32,8 +32,12 @@ const App: React.FC = () => {
       setIsAuthCallback(true);
     }
     
-    // Cek untuk reset password (hash dari Supabase)
-    if (hash.includes('type=recovery') || search.includes('type=recovery')) {
+    // Cek untuk reset password - lebih lengkap
+    const isRecovery = hash.includes('type=recovery') || 
+                       search.includes('type=recovery') ||
+                       (hash.includes('access_token') && pathname === '/');
+    
+    if (isRecovery) {
       setIsResetPassword(true);
     }
   }, []);
@@ -66,7 +70,6 @@ const App: React.FC = () => {
         return;
       }
       
-      // Format data sesuai tipe Pond
       const formattedPonds: Pond[] = data.map((item: any) => ({
         id: item.id,
         name: item.name || '',
@@ -89,7 +92,6 @@ const App: React.FC = () => {
         inviteCodeExpiry: item.invite_code_expiry ? new Date(item.invite_code_expiry).getTime() : undefined
       }));
       
-      // Filter kolam yang user punya akses
       const myPonds = formattedPonds.filter(p => 
         p.members?.some((m: any) => m.id === user.id) || p.ownerId === user.id
       );
