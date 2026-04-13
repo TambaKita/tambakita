@@ -6,7 +6,7 @@ interface DashboardProps {
   user: User;
 }
 
-// Komponen Notifikasi (sama)
+// Komponen Notifikasi
 const Notification: React.FC<{ 
   message: string; 
   type: 'success' | 'error' | 'warning';
@@ -25,7 +25,7 @@ const Notification: React.FC<{
   );
 };
 
-// Komponen InviteCodeDisplay (tanpa QR)
+// Komponen InviteCodeDisplay
 const InviteCodeDisplay: React.FC<{ code: string; expiry: number; onClear: () => void }> = ({ code, expiry, onClear }) => {
   const [timeLeft, setTimeLeft] = useState(Math.max(0, Math.floor((expiry - Date.now()) / 1000)));
   const [copied, setCopied] = useState(false);
@@ -76,6 +76,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState<Array<{ id: string; message: string; type: 'success' | 'error' | 'warning' }>>([]);
 
+  // State untuk modal hapus
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [pondToDelete, setPondToDelete] = useState<Pond | null>(null);
+
   const addNotification = (message: string, type: 'success' | 'error' | 'warning') => {
     const id = Date.now().toString();
     setNotifications(prev => [...prev, { id, message, type }]);
@@ -102,63 +106,82 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
   const [showFeedManagerId, setShowFeedManagerId] = useState<string | null>(null);
   const [newFeedName, setNewFeedName] = useState('');
 
+  // Fungsi untuk mencatat aktivitas ke daily_activities
+  const logActivity = async (pondId: string, pondName: string, activityType: string, amount: number | null = null, notes: string = '') => {
+    try {
+      const activityData = {
+        pond_id: pondId,
+        user_id: user.id,
+        activity_type: activityType,
+        amount: amount,
+        notes: notes,
+        created_at: new Date().toISOString()
+      };
+      
+      const { error } = await supabase
+        .from('daily_activities')
+        .insert([activityData]);
+      
+      if (error) {
+        console.error('Gagal mencatat aktivitas:', error);
+      } else {
+        console.log('Aktivitas tercatat:', activityType, 'untuk kolam', pondName);
+      }
+    } catch (error) {
+      console.error('Error logging activity:', error);
+    }
+  };
+
   // Ambil data kolam dari Supabase
   const fetchPonds = async () => {
-  try {
-    setLoading(true);
-    console.log('📥 Fetching ponds...');
-    
-    const { data, error } = await supabase
-      .from('ponds')
-      .select('*');
-    
-    if (error) {
-      console.error('❌ Fetch error:', error);
-      throw error;
-    }
-    
-    console.log('📦 Data mentah:', data);
-    
-    if (!data || data.length === 0) {
-      setPonds([]);
+    try {
+      setLoading(true);
+      console.log('📥 Fetching ponds...');
+      
+      const { data, error } = await supabase
+        .from('ponds')
+        .select('*');
+      
+      if (error) {
+        console.error('❌ Fetch error:', error);
+        throw error;
+      }
+      
+      if (!data || data.length === 0) {
+        setPonds([]);
+        setLoading(false);
+        return;
+      }
+      
+      const formattedPonds: Pond[] = data.map((item: any) => ({
+        id: item.id,
+        name: item.name || '',
+        type: item.type || 'Bioflok',
+        size: item.size || 'D3 (Standard)',
+        ownerId: item.owner_id,
+        ownerName: item.owner_name || '',
+        fishType: item.fish_type || 'Nila',
+        fishCount: item.fish_count || 0,
+        members: item.members || [],
+        customFeeds: item.custom_feeds || ['LP-1', 'LP-2', 'LP-3'],
+        currentMetrics: item.current_metrics || { ph: 7, temp: 28, ammonia: 0, do: 5, lastUpdated: new Date().toISOString() },
+        inviteCode: item.invite_code,
+        inviteCodeExpiry: item.invite_code_expiry ? new Date(item.invite_code_expiry).getTime() : undefined
+      }));
+      
+      const myPonds = formattedPonds.filter(p => 
+        p.ownerId === user.id || p.members?.some((m: any) => m.id === user.id)
+      );
+      
+      setPonds(myPonds);
+      
+    } catch (error) {
+      console.error('❌ Error di fetchPonds:', error);
+      addNotification('Gagal memuat data kolam', 'error');
+    } finally {
       setLoading(false);
-      return;
     }
-    
-    const formattedPonds: Pond[] = data.map((item: any) => ({
-      id: item.id,
-      name: item.name || '',
-      type: item.type || 'Bioflok',
-      size: item.size || 'D3 (Standard)',
-      ownerId: item.owner_id,
-      ownerName: item.owner_name || '',
-      fishType: item.fish_type || 'Nila',
-      fishCount: item.fish_count || 0,
-      members: item.members || [],
-      customFeeds: item.custom_feeds || ['LP-1', 'LP-2', 'LP-3'],
-      currentMetrics: item.current_metrics || { ph: 7, temp: 28, ammonia: 0, do: 5, lastUpdated: new Date().toISOString() },
-      inviteCode: item.invite_code,
-      inviteCodeExpiry: item.invite_code_expiry ? new Date(item.invite_code_expiry).getTime() : undefined
-    }));
-    
-    console.log('✅ Data terformat:', formattedPonds);
-    
-    // 🔥 FILTER: Hanya kolam yang user adalah owner ATAU anggota (staff)
-    const myPonds = formattedPonds.filter(p => 
-      p.ownerId === user.id || p.members?.some((m: any) => m.id === user.id)
-    );
-    
-    console.log('✅ Data setelah filter:', myPonds);
-    
-    setPonds(myPonds);
-    
-  } catch (error) {
-    console.error('❌ Error di fetchPonds:', error);
-    addNotification('Gagal memuat data kolam', 'error');
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   useEffect(() => {
     fetchPonds();
@@ -172,7 +195,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     }
     
     try {
-      console.log('➕ Menambah kolam...');
       const fishCountNum = parseInt(newPondCount) || 0;
       
       const newPond = {
@@ -193,12 +215,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         .select();
 
       if (error) {
-        console.error('❌ Error:', error);
         addNotification('Gagal tambah kolam: ' + error.message, 'error');
         return;
       }
-
-      console.log('✅ Data dari Supabase:', data);
 
       if (data && data.length > 0) {
         const pondFromDB = data[0];
@@ -218,55 +237,57 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         };
 
         setPonds([...ponds, newPondFormatted]);
+        
+        const activityNote = `Kolam baru: ${newPondName} | Jenis: ${newPondType} | Ikan: ${newPondFish} | Jumlah: ${fishCountNum} ekor`;
+        await logActivity(pondFromDB.id, newPondName, 'PondCreation', fishCountNum, activityNote);
+        
         setNewPondName('');
         setShowAddPond(false);
         addNotification('Kolam berhasil ditambahkan!', 'success');
       }
       
     } catch (err) {
-      console.error('💥 Error:', err);
-      addNotification('Terjadi kesalahan: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
-    }
-  };
-
-  // Hapus kolam
-  const handleDeletePond = async (pondId: string) => {
-    if (!confirm('Anda yakin hapus kolam ini? Data akan hilang permanen!')) {
-      setEditingPondId(null);
-      return;
-    }
-    
-    try {
-      const pondToDelete = ponds.find(p => p.id === pondId);
-      if (!pondToDelete) return;
-      
-      if (pondToDelete.ownerId !== user.id) {
-        addNotification('Hanya owner yang bisa menghapus kolam!', 'error');
-        return;
-      }
-      
-      const { error } = await supabase
-        .from('ponds')
-        .delete()
-        .eq('id', pondId);
-
-      if (error) {
-        console.error('❌ Error:', error);
-        addNotification('Gagal hapus: ' + error.message, 'error');
-        return;
-      }
-
-      setPonds(ponds.filter(p => p.id !== pondId));
-      setEditingPondId(null);
-      addNotification('Kolam berhasil dihapus!', 'success');
-      
-    } catch (err) {
-      console.error('💥 Error:', err);
+      console.error('Error:', err);
       addNotification('Terjadi kesalahan', 'error');
     }
   };
 
-  // Join kolam (hanya kode manual)
+  // Hapus kolam (dipanggil dari modal)
+  const handleDeletePond = async () => {
+    if (!pondToDelete) return;
+    
+    if (pondToDelete.ownerId !== user.id) {
+      addNotification('Hanya owner yang bisa menghapus kolam!', 'error');
+      setShowDeleteModal(false);
+      setPondToDelete(null);
+      return;
+    }
+    
+    try {
+      const { error } = await supabase
+        .from('ponds')
+        .delete()
+        .eq('id', pondToDelete.id);
+
+      if (error) {
+        addNotification('Gagal hapus: ' + error.message, 'error');
+        return;
+      }
+
+      setPonds(ponds.filter(p => p.id !== pondToDelete.id));
+      setEditingPondId(null);
+      addNotification('Kolam berhasil dihapus!', 'success');
+      
+    } catch (err) {
+      console.error('Error:', err);
+      addNotification('Terjadi kesalahan', 'error');
+    } finally {
+      setShowDeleteModal(false);
+      setPondToDelete(null);
+    }
+  };
+
+  // Join kolam
   const handleJoinPond = async () => {
     if (!joinCode) {
       addNotification('Masukkan kode join', 'error');
@@ -307,6 +328,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
 
       if (updateError) throw updateError;
 
+      await logActivity(data.id, data.name, 'JoinPond', null, `${user.name} bergabung ke kolam`);
+
       addNotification(`Berhasil bergabung dengan kolam ${data.name}!`, 'success');
       setShowJoinPond(false);
       setJoinCode('');
@@ -318,7 +341,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
     }
   };
 
-  // Generate kode undangan (tanpa QR code)
+  // Generate kode undangan
   const handleGenerateCode = async (pondId: string) => {
     try {
       const code = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -448,6 +471,54 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         ))}
       </div>
 
+      {/* Modal Konfirmasi Hapus Kolam */}
+      {showDeleteModal && pondToDelete && (
+        <div className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="bg-gradient-to-r from-rose-500 to-red-600 p-5 text-white text-center">
+              <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                <i className="fas fa-trash-alt text-3xl"></i>
+              </div>
+              <h3 className="text-xl font-black uppercase tracking-wider">Hapus Kolam?</h3>
+              <p className="text-[10px] opacity-80 mt-1">Tindakan ini tidak dapat dibatalkan</p>
+            </div>
+            
+            <div className="p-6">
+              <div className="bg-rose-50 p-4 rounded-xl mb-4">
+                <p className="text-center text-sm font-bold text-rose-800">
+                  {pondToDelete.name}
+                </p>
+                <p className="text-center text-[10px] text-rose-600 mt-1">
+                  {pondToDelete.fishType} • {pondToDelete.fishCount.toLocaleString()} ekor
+                </p>
+              </div>
+              
+              <p className="text-[11px] text-slate-500 text-center mb-4">
+                Semua data aktivitas, catatan, dan riwayat kolam ini akan hilang permanen.
+              </p>
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowDeleteModal(false);
+                    setPondToDelete(null);
+                  }}
+                  className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm uppercase active:bg-slate-200 transition-all"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleDeletePond}
+                  className="flex-1 py-3 bg-rose-500 text-white rounded-xl font-bold text-sm uppercase active:bg-rose-600 transition-all shadow-lg shadow-rose-500/30"
+                >
+                  Hapus
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-6 rounded-[2.5rem] text-white shadow-xl relative">
         <h2 className="text-2xl font-black mb-1 tracking-tighter">Manajemen Kolam</h2>
@@ -458,7 +529,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         </div>
       </div>
 
-      {/* Form Join (hanya input manual) */}
+      {/* Form Join */}
       {showJoinPond && (
         <div className="bg-white p-6 rounded-[2.5rem] shadow-xl border border-blue-100 space-y-4 animate-in slide-in-from-top-4">
           <div className="flex justify-between items-center mb-2">
@@ -480,14 +551,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         </div>
       )}
 
-      {/* Form Tambah Kolam (sama) */}
+      {/* Form Tambah Kolam */}
       {showAddPond && (
         <div className="bg-white p-5 rounded-[2rem] shadow-xl border border-blue-50 space-y-4 animate-in fade-in">
           <h3 className="font-black text-slate-800 text-xs uppercase tracking-widest">Tambah Kolam</h3>
           <input type="text" placeholder="Nama Kolam" value={newPondName} onChange={e => setNewPondName(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl border-none text-sm font-bold outline-none" />
           <div className="grid grid-cols-2 gap-2">
             <input type="text" placeholder="Jenis Ikan" value={newPondFish} onChange={e => setNewPondFish(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl border-none text-sm font-bold outline-none" />
-            <input type="number" placeholder="Jumlah" value={newPondCount} onChange={e => setNewPondCount(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl border-none text-sm font-bold outline-none" />
+            <input type="number" placeholder="Jumlah (Ekor)" value={newPondCount} onChange={e => setNewPondCount(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl border-none text-sm font-bold outline-none" />
           </div>
           <select value={newPondType} onChange={e => setNewPondType(e.target.value as any)} className="w-full p-4 bg-slate-50 rounded-2xl border-none text-sm font-black text-slate-700 outline-none">
             <option value="Bioflok">Bioflok</option>
@@ -502,7 +573,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
         </div>
       )}
 
-      {/* Daftar Kolam (sama, hanya bagian Akses Staf yang sudah tidak menampilkan QR) */}
+      {/* Daftar Kolam */}
       <div className="space-y-4">
         <h3 className="font-black text-slate-400 px-1 uppercase text-[10px] tracking-[0.2em]">Daftar Kolam</h3>
         {loading ? (
@@ -521,7 +592,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
             return (
               <div key={pond.id} className={`bg-white rounded-[2rem] shadow-sm border transition-all ${isCritical ? 'border-rose-300 ring-4 ring-rose-50' : 'border-slate-50'}`}>
                 <div className="p-5 space-y-4">
-                  {/* ... (bagian atas sama) */}
                   <div className="flex justify-between items-start">
                     <div className="flex items-center gap-3">
                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-inner relative overflow-hidden ${isCritical ? 'logo-gradient text-white animate-pulse' : 'logo-gradient text-white opacity-90'}`}>
@@ -610,7 +680,16 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                           <button onClick={() => setEditingPondId(null)} className="flex-1 py-2 bg-slate-200 text-slate-600 rounded-lg text-[10px] font-black uppercase">Batal</button>
                         </div>
                         <div className="pt-2 border-t border-slate-200">
-                          <button onClick={() => handleDeletePond(pond.id)} className="w-full py-2 bg-rose-50 text-rose-600 rounded-lg text-[10px] font-black uppercase active:bg-rose-100">Hapus Kolam Secara Permanen</button>
+                          <button 
+                            onClick={() => {
+                              setPondToDelete(pond);
+                              setShowDeleteModal(true);
+                              setEditingPondId(null);
+                            }} 
+                            className="w-full py-2 bg-rose-50 text-rose-600 rounded-lg text-[10px] font-black uppercase active:bg-rose-100"
+                          >
+                            Hapus Kolam Secara Permanen
+                          </button>
                         </div>
                       </div>
                     ) : (
@@ -641,7 +720,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user }) => {
                     </div>
                   </div>
 
-                  {/* Akses Staf (tanpa QR code) */}
+                  {/* Akses Staf */}
                   {isOwner && (
                     <div className="p-3 bg-blue-50/50 rounded-2xl space-y-3">
                       <div className="flex justify-between items-center">

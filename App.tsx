@@ -3,12 +3,11 @@ import BottomNav from './components/BottomNav';
 import Dashboard from './components/Dashboard';
 import ActivityPage from './components/ActivityPage';
 import CalculatorPage from './components/CalculatorPage';
-import ForumPage from './components/ForumPage';
 import ProfilePage from './components/ProfilePage';
-import MessagesPage from './components/MessagesPage';
 import AuthPage from './components/AuthPage';
 import AuthCallback from './components/AuthCallback';
-import { NavTab, User, Pond, DirectMessage, AppNotification } from './types';
+import ResetPasswordPage from './components/ResetPasswordPage';
+import { NavTab, User, Pond } from './types';
 import { authService } from './services/authService';
 import { supabase } from './src/lib/supabase';
 
@@ -17,26 +16,39 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<NavTab>(NavTab.Dashboard);
   const [isInitializing, setIsInitializing] = useState(true);
   const [showUrgentModal, setShowUrgentModal] = useState(false);
-  const [showNotifModal, setShowNotifModal] = useState(false);
   const [ponds, setPonds] = useState<Pond[]>([]);
-  const [messages, setMessages] = useState<DirectMessage[]>([]);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [chatPartner, setChatPartner] = useState<User | null>(null);
-  const [unreadMsgCount, setUnreadMsgCount] = useState(0);
   const [isAuthCallback, setIsAuthCallback] = useState(false);
+  const [isResetPassword, setIsResetPassword] = useState(false);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Cek apakah halaman callback
+  // Cek apakah halaman callback atau reset password
   useEffect(() => {
-    if (window.location.pathname.includes('/auth/callback')) {
+    const pathname = window.location.pathname;
+    const hash = window.location.hash;
+    const search = window.location.search;
+    
+    if (pathname.includes('/auth/callback')) {
       setIsAuthCallback(true);
+    }
+    
+    // Cek untuk reset password (hash dari Supabase)
+    if (hash.includes('type=recovery') || search.includes('type=recovery')) {
+      setIsResetPassword(true);
     }
   }, []);
 
   // Jika halaman callback, tampilkan AuthCallback
   if (isAuthCallback) {
     return <AuthCallback />;
+  }
+  
+  // Jika halaman reset password
+  if (isResetPassword) {
+    return <ResetPasswordPage onPasswordReset={() => {
+      setIsResetPassword(false);
+      window.location.href = '/';
+    }} />;
   }
 
   // === AMBIL DATA KOLAM DARI SUPABASE ===
@@ -97,39 +109,6 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [user]);
 
-  // Sinkronisasi messages dari localStorage (tetap)
-  useEffect(() => {
-    const savedDms = localStorage.getItem('tambakita_dms');
-    if (savedDms) setMessages(JSON.parse(savedDms));
-  }, [activeTab]);
-
-  // Ambil jumlah pesan belum dibaca dari Supabase
-  useEffect(() => {
-    if (!user) return;
-    
-    const fetchUnreadCount = async () => {
-      const { count, error } = await supabase
-        .from('direct_messages')
-        .select('*', { count: 'exact', head: true })
-        .eq('receiver_id', user.id)
-        .eq('is_read', false);
-      
-      if (!error) setUnreadMsgCount(count || 0);
-    };
-    
-    fetchUnreadCount();
-    
-    const subscription = supabase
-      .channel('direct_messages')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'direct_messages' }, 
-        () => fetchUnreadCount()
-      )
-      .subscribe();
-    
-    return () => subscription.unsubscribe();
-  }, [user]);
-
   // Urgent alerts dari data ponds realtime
   const urgentAlerts = useMemo(() => {
     if (!user) return [];
@@ -185,90 +164,6 @@ const App: React.FC = () => {
     initAuth();
   }, []);
 
-  // === AMBIL NOTIFIKASI DARI SUPABASE ===
-  const fetchNotifications = async () => {
-    if (!user) return;
-    try {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', user.id)
-        .neq('type', 'danger')
-        .order('created_at', { ascending: false })
-        .limit(20);
-
-      if (error) throw error;
-
-      const appNotifs: AppNotification[] = (data || []).map(n => ({
-        id: n.id,
-        userId: n.user_id,
-        type: n.type,
-        fromName: n.from_name,
-        postExcerpt: n.post_excerpt,
-        timestamp: n.created_at,
-        isRead: n.is_read
-      }));
-
-      setNotifications(appNotifs);
-    } catch (error) {
-      console.error('Gagal mengambil notifikasi:', error);
-    }
-  };
-
-  // Polling notifikasi setiap 3 detik
-  useEffect(() => {
-    if (!user) return;
-    fetchNotifications();
-    const interval = setInterval(fetchNotifications, 3000);
-    return () => clearInterval(interval);
-  }, [user]);
-
-  const unreadNotifCount = useMemo(
-    () => notifications.filter(n => n.userId === user?.id && !n.isRead).length,
-    [notifications, user]
-  );
-
-  const handleOpenChat = (partner: User) => {
-    setChatPartner(partner);
-    setActiveTab(NavTab.Messages);
-  };
-
-  const hapusNotifYangSudahDibaca = async () => {
-    if (!user) return;
-    
-    const idNotifYangSudahDibaca = notifications
-      .filter(n => n.isRead === true)
-      .map(n => n.id);
-    
-    if (idNotifYangSudahDibaca.length === 0) return;
-    
-    await supabase
-      .from('notifications')
-      .delete()
-      .in('id', idNotifYangSudahDibaca);
-    
-    setNotifications(prev => prev.filter(n => !n.isRead));
-  };
-
-  const markNotifsAsRead = async () => {
-    if (!user) return;
-    try {
-      const { error } = await supabase
-        .from('notifications')
-        .update({ is_read: true })
-        .eq('user_id', user.id)
-        .eq('is_read', false);
-      
-      if (error) throw error;
-      
-      setNotifications(prev => prev.map(n => 
-        n.userId === user.id ? { ...n, isRead: true } : n
-      ));
-    } catch (error) {
-      console.error('Gagal menandai notifikasi dibaca:', error);
-    }
-  };
-
   if (isInitializing)
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
@@ -309,143 +204,25 @@ const App: React.FC = () => {
         </div>
         <div className="flex gap-2 items-center">
           <button
-            onClick={() => setActiveTab(NavTab.Messages)}
-            className={`w-11 h-11 flex items-center justify-center relative rounded-xl transition-all ${
-              activeTab === NavTab.Messages ? 'bg-blue-50 text-blue-600' : 'text-slate-400'
-            }`}
-          >
-            <i className="far fa-comment-dots text-xl"></i>
-            {unreadMsgCount > 0 && (
-              <span className="absolute top-2 right-2 w-5 h-5 bg-blue-600 rounded-full border-2 border-white flex items-center justify-center text-[9px] text-white font-black">
-                {unreadMsgCount > 99 ? '99+' : unreadMsgCount}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => {
-              setShowNotifModal(true);
-              markNotifsAsRead();
-            }}
-            className={`w-11 h-11 flex items-center justify-center relative rounded-xl transition-all ${
-              unreadNotifCount > 0 ? 'bg-rose-50 text-rose-500' : 'text-slate-400'
-            }`}
-          >
-            <i className="far fa-bell text-xl"></i>
-            {unreadNotifCount > 0 && (
-              <span className="absolute top-2 right-2 w-5 h-5 bg-rose-500 rounded-full border-2 border-white flex items-center justify-center text-[9px] text-white font-black">
-                {unreadNotifCount > 99 ? '99+' : unreadNotifCount}
-              </span>
-            )}
-          </button>
-          <button
             onClick={() => setActiveTab(NavTab.Profile)}
-            className={`w-11 h-11 rounded-xl flex items-center justify-center text-sm font-black transition-all ${
+            className={`w-11 h-11 rounded-xl flex items-center justify-center text-sm font-black transition-all overflow-hidden ${
               activeTab === NavTab.Profile
                 ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/30'
                 : 'bg-slate-50 text-slate-400 border border-slate-100 active:scale-90'
             }`}
           >
-            {user.name?.[0]?.toUpperCase()}
+            {user.avatar ? (
+              <img 
+                src={user.avatar} 
+                alt={user.name}
+                className="w-full h-full object-cover rounded-xl"
+              />
+            ) : (
+              user.name?.[0]?.toUpperCase()
+            )}
           </button>
         </div>
       </header>
-
-      {showNotifModal && (
-        <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
-          <div className="bg-white w-full max-w-sm rounded-[3rem] shadow-2xl overflow-hidden flex flex-col border border-white/20">
-            <div className="bg-blue-600 p-6 text-white text-center">
-              <h3 className="text-lg font-black uppercase tracking-widest leading-none">Notifikasi</h3>
-            </div>
-            <div className="p-4 space-y-3 max-h-[400px] overflow-y-auto no-scrollbar">
-              {notifications.filter(n => n.userId === user.id).length === 0 ? (
-                <p className="text-center py-10 text-slate-300 font-bold text-sm uppercase">
-                  Belum ada aktifitas.
-                </p>
-              ) : (
-                notifications
-                  .filter(n => n.userId === user.id)
-                  .map(n => (
-                    <div
-                      key={n.id}
-                      className={`p-4 rounded-[1.5rem] border flex gap-4 transition-all ${
-                        n.type === 'danger' ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-100'
-                      }`}
-                    >
-                      <div
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                          n.type === 'like'
-                            ? 'bg-rose-100 text-rose-500'
-                            : n.type === 'danger'
-                            ? 'bg-rose-600 text-white animate-pulse shadow-lg'
-                            : 'bg-blue-100 text-blue-500'
-                        }`}
-                      >
-                        <i
-                          className={`fas ${
-                            n.type === 'like'
-                              ? 'fa-heart'
-                              : n.type === 'danger'
-                              ? 'fa-triangle-exclamation'
-                              : 'fa-comment'
-                          }`}
-                        ></i>
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <p
-                            className={`text-[10px] font-black uppercase tracking-tighter ${
-                              n.type === 'danger' ? 'text-rose-600' : 'text-blue-600'
-                            }`}
-                          >
-                            {n.type === 'danger' ? 'DANGER ALERT' : n.fromName}
-                          </p>
-                          {!n.isRead && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full"></span>}
-                        </div>
-                        <p
-                          className={`text-[11px] leading-tight ${
-                            n.type === 'danger' ? 'text-slate-900 font-black' : 'text-slate-700 font-medium'
-                          }`}
-                        >
-                          {n.type === 'danger' ? (
-                            n.postExcerpt
-                          ) : (
-                            <>
-                              {n.type === 'like'
-                                ? 'menyukai'
-                                : n.type === 'reply'
-                                ? 'membalas'
-                                : 'mengomentari'}{' '}
-                              postingan Anda.
-                            </>
-                          )}
-                        </p>
-                        {n.postExcerpt && n.type !== 'danger' && (
-                          <p className="text-[10px] text-slate-400 font-bold italic mt-1 truncate max-w-[150px]">
-                            "{n.postExcerpt}"
-                          </p>
-                        )}
-                        <p className="text-[8px] text-slate-300 font-black mt-1 uppercase tracking-tighter">
-                          {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      </div>
-                    </div>
-                  ))
-              )}
-            </div>
-            <div className="p-4">
-              <button
-                onClick={() => {
-                  setShowNotifModal(false);
-                  hapusNotifYangSudahDibaca();
-                }}
-                className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase"
-              >
-                Tutup
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {showUrgentModal && (
         <div className="fixed inset-0 z-[70] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in">
@@ -489,7 +266,6 @@ const App: React.FC = () => {
           {activeTab === NavTab.Dashboard && <Dashboard user={user} />}
           {activeTab === NavTab.Activity && <ActivityPage user={user} />}
           {activeTab === NavTab.Calculator && <CalculatorPage />}
-          {activeTab === NavTab.Community && <ForumPage user={user} onOpenChat={handleOpenChat} />}
           {activeTab === NavTab.Profile && (
             <ProfilePage
               user={user}
@@ -500,15 +276,11 @@ const App: React.FC = () => {
               onUpdateUser={setUser}
             />
           )}
-          {activeTab === NavTab.Messages && <MessagesPage user={user} initialChatWith={chatPartner} />}
         </div>
       </main>
       <BottomNav
         activeTab={activeTab}
-        onTabChange={(tab) => {
-          setChatPartner(null);
-          setActiveTab(tab);
-        }}
+        onTabChange={(tab) => setActiveTab(tab)}
       />
     </div>
   );

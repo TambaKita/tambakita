@@ -11,15 +11,25 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onPasswordReset }
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isValidToken, setIsValidToken] = useState(true);
 
   useEffect(() => {
-    // Cek apakah token valid
-    const hash = window.location.hash;
-    if (!hash || (!hash.includes('type=recovery') && !hash.includes('access_token'))) {
-      setError('Link reset password tidak valid atau sudah kadaluarsa');
-      setIsValidToken(false);
-    }
+    // Cek apakah user datang dari link reset password
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        // Cek hash di URL (format Supabase)
+        const hash = window.location.hash;
+        if (hash && hash.includes('access_token')) {
+          // Token ada di hash, Supabase akan memprosesnya
+          console.log('Token detected, waiting for Supabase...');
+        } else {
+          setError('Link reset password tidak valid atau sudah kadaluarsa');
+        }
+      }
+    };
+    
+    checkSession();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -40,104 +50,83 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onPasswordReset }
     setMessage('');
 
     try {
-      const { error } = await supabase.auth.updateUser({ password });
+      // Update password - Supabase akan mengambil token dari session
+      const { error } = await supabase.auth.updateUser({ 
+        password: password 
+      });
       
       if (error) throw error;
       
-      setMessage('✅ Password berhasil direset!');
+      setMessage('✅ Password berhasil direset! Mengarahkan ke halaman login...');
+      
       setTimeout(() => {
         onPasswordReset();
       }, 2000);
       
     } catch (err: any) {
       console.error('Reset password error:', err);
-      
-      if (err.message.includes('JWT')) {
-        setError('Token reset password sudah kadaluarsa. Silakan minta link baru.');
-      } else {
-        setError(err.message);
-      }
+      setError(err.message || 'Gagal reset password. Mungkin link sudah kadaluarsa.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (!isValidToken) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-[#f8fafc]">
-        <div className="w-full max-w-md bg-white rounded-[3.5rem] shadow-xl p-8 text-center">
-          <div className="text-red-500 text-6xl mb-4">⚠️</div>
-          <h2 className="text-2xl font-black text-slate-900 mb-4">Link Tidak Valid</h2>
-          <p className="text-slate-600 mb-6">{error}</p>
-          <button
-            onClick={() => window.location.href = '/'}
-            className="w-full py-4 bg-blue-600 text-white rounded-xl font-black"
-          >
-            Kembali ke Login
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-[#f8fafc]">
-      <div className="w-full max-w-md bg-white rounded-[3.5rem] shadow-xl p-8">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-600 to-blue-800">
+      <div className="w-full max-w-md bg-white rounded-3xl p-8 shadow-2xl">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-black text-slate-900 tracking-tighter mb-2">
-            Reset<span className="text-blue-600">Password</span>
-          </h1>
-          <p className="text-slate-400 text-xs font-medium">
-            Masukkan password baru Anda
-          </p>
+          <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <i className="fas fa-lock text-blue-600 text-3xl"></i>
+          </div>
+          <h1 className="text-2xl font-black text-slate-800">Reset Password</h1>
+          <p className="text-slate-500 text-sm mt-2">Masukkan password baru Anda</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {message && (
-            <div className="p-4 bg-emerald-50 text-emerald-600 text-sm rounded-xl font-bold text-center">
-              {message}
-            </div>
-          )}
-
-          {error && (
-            <div className="p-4 bg-red-50 text-red-600 text-sm rounded-xl font-bold text-center">
-              {error}
-            </div>
-          )}
-
-          <div className="space-y-1">
-            <label className="text-xs font-black text-blue-600 uppercase ml-2 tracking-widest">
+          <div>
+            <label className="text-[10px] font-black text-blue-600 uppercase ml-2 tracking-widest">
               Password Baru
             </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full p-4 bg-slate-50 rounded-xl border-none focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-sm"
+              className="w-full p-4 bg-slate-50 rounded-2xl border-none text-sm font-bold outline-none focus:ring-2 focus:ring-blue-200"
               placeholder="Minimal 6 karakter"
               required
-              minLength={6}
             />
           </div>
 
-          <div className="space-y-1">
-            <label className="text-xs font-black text-blue-600 uppercase ml-2 tracking-widest">
+          <div>
+            <label className="text-[10px] font-black text-blue-600 uppercase ml-2 tracking-widest">
               Konfirmasi Password
             </label>
             <input
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full p-4 bg-slate-50 rounded-xl border-none focus:ring-2 focus:ring-blue-500/20 outline-none font-bold text-sm"
-              placeholder="Ketik ulang password"
+              className="w-full p-4 bg-slate-50 rounded-2xl border-none text-sm font-bold outline-none focus:ring-2 focus:ring-blue-200"
+              placeholder="Ulangi password baru"
               required
             />
           </div>
 
+          {error && (
+            <div className="p-4 bg-red-50 text-red-600 text-sm rounded-2xl font-bold text-center border border-red-100">
+              {error}
+            </div>
+          )}
+
+          {message && (
+            <div className="p-4 bg-emerald-50 text-emerald-600 text-sm rounded-2xl font-bold text-center border border-emerald-100">
+              {message}
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-4 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-xl font-black text-base shadow-xl active:scale-95 transition-all disabled:opacity-70"
+            className="w-full py-4 bg-gradient-to-r from-blue-600 to-blue-500 text-white rounded-2xl font-black text-sm uppercase shadow-xl active:scale-95 transition-all disabled:opacity-70"
           >
             {loading ? (
               <div className="w-5 h-5 border-3 border-white/30 border-t-white rounded-full animate-spin mx-auto"></div>

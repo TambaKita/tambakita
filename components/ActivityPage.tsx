@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { User, Pond } from '../types';
 import { supabase } from '../src/lib/supabase';
-import jsPDF from 'jspdf';
-
-interface ActivityPageProps {
-  user: User;
-}
+import { exportToPDF } from '../utils/exportPDF';
+import Toast from './Toast';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 
 interface ActivityLog {
   id: string;
@@ -30,24 +29,32 @@ interface ActivityLog {
   ammonia?: number;
 }
 
-const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
+const ActivityPage: React.FC<{ user: User }> = ({ user }) => {
   const [ponds, setPonds] = useState<Pond[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [exportingExcel, setExportingExcel] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info' } | null>(null);
+  
+  const [editingLog, setEditingLog] = useState<ActivityLog | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState<any>({});
+  
+  const [exportStartDate, setExportStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [exportEndDate, setExportEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [exportPondId, setExportPondId] = useState('all');
+  const [exportFormat, setExportFormat] = useState('pdf');
 
   const [activeType, setActiveType] = useState<string>('Feeding');
   const [selectedPondId, setSelectedPondId] = useState('');
+  const [activityDate, setActivityDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Filter States
   const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
   const [filterPondId, setFilterPondId] = useState('all');
 
-  // Form States
   const [pakanKg, setPakanKg] = useState('');
   const [pakanJenis, setPakanJenis] = useState('');
   const [matiJumlah, setMatiJumlah] = useState('');
@@ -63,13 +70,14 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
   const [airAmonia, setAirAmonia] = useState('');
   const [catatanUmum, setCatatanUmum] = useState('');
 
-  // Ambil data kolam (hanya yang user punya akses)
+  const isPondOwner = (pondId: string) => {
+    const pond = ponds.find(p => p.id === pondId);
+    return pond?.ownerId === user.id;
+  };
+
   const fetchPonds = async () => {
     try {
-      const { data, error } = await supabase
-        .from('ponds')
-        .select('*');
-
+      const { data, error } = await supabase.from('ponds').select('*');
       if (error) throw error;
 
       const formattedPonds: Pond[] = (data || []).map((item: any) => ({
@@ -98,7 +106,6 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
     }
   };
 
-  // Ambil riwayat aktivitas dengan filter
   const fetchActivities = async () => {
     if (!user) return;
     
@@ -110,11 +117,14 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
       const endDateTime = new Date(filterDate);
       endDateTime.setHours(23, 59, 59, 999);
 
+      const myPondIds = ponds.map(p => p.id);
+      
       let query = supabase
         .from('daily_activities')
         .select('*')
         .gte('created_at', startDateTime.toISOString())
         .lte('created_at', endDateTime.toISOString())
+        .in('pond_id', myPondIds)
         .order('created_at', { ascending: false });
 
       if (filterPondId !== 'all') {
@@ -122,7 +132,6 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
       }
 
       const { data: activities, error: activitiesError } = await query;
-
       if (activitiesError) throw activitiesError;
 
       const { data: profiles, error: profilesError } = await supabase
@@ -166,23 +175,25 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
     }
   };
 
-  // Ambil data untuk export dengan range tanggal
-  const fetchActivitiesForExport = async (start: string, end: string, pondId: string) => {
+  const fetchActivitiesForExport = async () => {
     try {
-      const startDateTime = new Date(start);
+      const startDateTime = new Date(exportStartDate);
       startDateTime.setHours(0, 0, 0, 0);
-      const endDateTime = new Date(end);
+      const endDateTime = new Date(exportEndDate);
       endDateTime.setHours(23, 59, 59, 999);
 
+      const myPondIds = ponds.map(p => p.id);
+      
       let query = supabase
         .from('daily_activities')
         .select('*')
         .gte('created_at', startDateTime.toISOString())
         .lte('created_at', endDateTime.toISOString())
+        .in('pond_id', myPondIds)
         .order('created_at', { ascending: true });
 
-      if (pondId !== 'all') {
-        query = query.eq('pond_id', pondId);
+      if (exportPondId !== 'all') {
+        query = query.eq('pond_id', exportPondId);
       }
 
       const { data: activities, error } = await query;
@@ -222,7 +233,6 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
     }
   };
 
-  // Broadcast notifikasi danger
   const broadcastDanger = async (pondName: string, pondId: string, reason: string) => {
     try {
       const { data: pond } = await supabase
@@ -248,196 +258,238 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
     }
   };
 
-  // Export ke PDF dengan range tanggal
-  const handleExportPDF = async () => {
-    setShowDatePicker(true);
-  };
-
-  const confirmExport = async () => {
-    setExporting(true);
-    setShowDatePicker(false);
-
+  // UPDATE AKTIVITAS
+  const handleUpdateLog = async () => {
+    if (!editingLog) return;
+    
+    setSubmitting(true);
+    
     try {
-      const exportLogs = await fetchActivitiesForExport(startDate, endDate, filterPondId);
+      const updateData: any = {};
       
-      if (exportLogs.length === 0) {
-        alert('Tidak ada data untuk periode yang dipilih!');
-        setExporting(false);
-        return;
-      }
-
-      const doc = new jsPDF('p', 'mm', 'a4');
-      
-      // Logo (ambil dari GitHub)
-      const imgUrl = 'https://raw.githubusercontent.com/TambaKita/tambakita/main/public/icon.png';
-      try {
-        const img = await fetch(imgUrl);
-        const imgBlob = await img.blob();
-        const reader = new FileReader();
-        reader.onloadend = function() {
-          const imgData = reader.result as string;
-          doc.addImage(imgData, 'PNG', 20, 15, 15, 15);
-        };
-        reader.readAsDataURL(imgBlob);
-      } catch (e) {
-        console.log('Logo not found');
+      if (editingLog.activity_type === 'Feeding') {
+        updateData.amount = editForm.amount;
+        updateData.feed_type = editForm.feed_type;
+      } else if (editingLog.activity_type === 'Mortality') {
+        updateData.amount = editForm.amount;
+      } else if (editingLog.activity_type === 'Sampling') {
+        updateData.sample_count = editForm.sample_count;
+        updateData.sample_weight = editForm.sample_weight;
+        updateData.sample_length = editForm.sample_length;
+      } else if (editingLog.activity_type === 'Medicine') {
+        updateData.medicine_name = editForm.medicine_name;
+        updateData.dose = editForm.dose;
+        updateData.dose_unit = editForm.dose_unit;
+      } else if (editingLog.activity_type === 'WaterParameter') {
+        updateData.ph = editForm.ph;
+        updateData.temperature = editForm.temperature;
+        updateData.dissolved_oxygen = editForm.dissolved_oxygen;
+        updateData.ammonia = editForm.ammonia;
       }
       
-      // Header
-      doc.setFontSize(24);
-      doc.setTextColor(37, 99, 235);
-      doc.text('TambaKita', 40, 25);
+      updateData.notes = editForm.notes;
       
-      doc.setFontSize(9);
-      doc.setTextColor(100, 116, 139);
-      doc.text('Smart Aquaculture Management', 40, 33);
-      
-      doc.setDrawColor(37, 99, 235);
-      doc.line(20, 40, 190, 40);
-      
-      // Title
-      doc.setFontSize(16);
-      doc.setTextColor(30, 41, 59);
-      doc.text('Laporan Aktivitas', 20, 55);
-      
-      // Info filter
-      doc.setFontSize(10);
-      doc.setTextColor(100, 116, 139);
-      
-      let yPos = 68;
-      
-      const selectedPondFilter = ponds.find(p => p.id === filterPondId);
-      if (filterPondId !== 'all' && selectedPondFilter) {
-        doc.text(`Kolam: ${selectedPondFilter.name} (${selectedPondFilter.fishType})`, 20, yPos);
-        yPos += 7;
-      } else {
-        doc.text(`Kolam: Semua Kolam`, 20, yPos);
-        yPos += 7;
+      if (isPondOwner(editingLog.pond_id) && editForm.created_at) {
+        const newDate = new Date(editForm.created_at + 'T12:00:00');
+        updateData.created_at = newDate.toISOString();
       }
       
-      doc.text(`Periode: ${new Date(startDate).toLocaleDateString('id-ID')} - ${new Date(endDate).toLocaleDateString('id-ID')}`, 20, yPos);
-      yPos += 7;
-      doc.text(`Diekspor pada: ${new Date().toLocaleString('id-ID')}`, 20, yPos);
-      yPos += 12;
-      
-      // Header tabel
-      doc.setFillColor(37, 99, 235);
-      doc.setDrawColor(37, 99, 235);
-      doc.rect(20, yPos, 170, 10, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(8);
-      doc.text('No', 25, yPos + 7);
-      doc.text('Tanggal', 40, yPos + 7);
-      doc.text('Waktu', 65, yPos + 7);
-      doc.text('Aktivitas', 85, yPos + 7);
-      doc.text('Detail', 115, yPos + 7);
-      doc.text('Catatan', 150, yPos + 7);
-      
-      yPos += 10;
-      doc.setTextColor(30, 41, 59);
-      
-      let no = 1;
-      for (const log of exportLogs) {
-        if (yPos > 270) {
-          doc.addPage();
-          yPos = 20;
-          // Ulang header tabel di halaman baru
-          doc.setFillColor(37, 99, 235);
-          doc.rect(20, yPos, 170, 10, 'F');
-          doc.setTextColor(255, 255, 255);
-          doc.text('No', 25, yPos + 7);
-          doc.text('Tanggal', 40, yPos + 7);
-          doc.text('Waktu', 65, yPos + 7);
-          doc.text('Aktivitas', 85, yPos + 7);
-          doc.text('Detail', 115, yPos + 7);
-          doc.text('Catatan', 150, yPos + 7);
-          yPos += 10;
-          doc.setTextColor(30, 41, 59);
-        }
+      const { error } = await supabase
+        .from('daily_activities')
+        .update(updateData)
+        .eq('id', editingLog.id);
         
-        const tanggal = new Date(log.created_at).toLocaleDateString('id-ID');
-        const waktu = new Date(log.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-        let aktivitas = '';
-        let detail = '';
-        
-        switch(log.activity_type) {
-          case 'Feeding': 
-            aktivitas = 'Pakan'; 
-            detail = `${log.amount} kg ${log.feed_type || ''}`; 
-            break;
-          case 'Mortality': 
-            aktivitas = 'Kematian'; 
-            detail = `${log.amount} ekor`; 
-            break;
-          case 'Sampling': 
-            aktivitas = 'Sampling'; 
-            detail = `${log.sample_count || 0} ekor, ${log.sample_weight || 0}g, ${log.sample_length || 0}cm`; 
-            break;
-          case 'Medicine': 
-            aktivitas = 'Obat'; 
-            detail = `${log.medicine_name} ${log.dose} ${log.dose_unit}`; 
-            break;
-          case 'WaterParameter': 
-            aktivitas = 'Parameter Air'; 
-            detail = `pH:${log.ph || '-'} Suhu:${log.temperature || '-'}°C DO:${log.dissolved_oxygen || '-'} NH3:${log.ammonia || '-'}`; 
-            break;
-          case 'Stocking':
-            aktivitas = 'Penambahan Ikan';
-            detail = `${log.amount} ekor ${log.notes?.split(' ')[2] || ''}`;
-            break;
-          default: 
-            aktivitas = log.activity_type; 
-            detail = '';
-        }
-        
-        doc.text(no.toString(), 25, yPos + 4);
-        doc.text(tanggal, 40, yPos + 4);
-        doc.text(waktu, 65, yPos + 4);
-        doc.text(aktivitas, 85, yPos + 4);
-        doc.text(detail.substring(0, 30), 115, yPos + 4);
-        doc.text(log.notes?.substring(0, 25) || '-', 150, yPos + 4);
-        
-        yPos += 7;
-        no++;
-      }
+      if (error) throw error;
       
-      // Footer
-      doc.setFontSize(7);
-      doc.setTextColor(148, 163, 184);
-      doc.text('TambaKita - Smart Aquaculture Management', 20, 285);
-      doc.text(new Date().toLocaleString('id-ID'), 150, 285);
-      
-      doc.save(`Laporan_Aktivitas_${startDate}_sd_${endDate}.pdf`);
+      setToast({ message: 'Aktivitas berhasil diupdate!', type: 'success' });
+      setShowEditModal(false);
+      setEditingLog(null);
+      fetchActivities();
       
     } catch (error) {
-      console.error('Error exporting PDF:', error);
-      alert('Gagal mengekspor PDF: ' + (error as any).message);
+      console.error('Error updating activity:', error);
+      setToast({ message: 'Gagal update aktivitas', type: 'error' });
     } finally {
-      setExporting(false);
+      setSubmitting(false);
     }
   };
 
-  // Simpan aktivitas
+  // HAPUS AKTIVITAS
+  const handleDeleteLog = async (logId: string) => {
+    if (!confirm('Hapus catatan aktivitas ini?')) return;
+    
+    try {
+      const { error } = await supabase
+        .from('daily_activities')
+        .delete()
+        .eq('id', logId);
+        
+      if (error) throw error;
+      
+      setToast({ message: 'Aktivitas berhasil dihapus!', type: 'success' });
+      fetchActivities();
+      
+    } catch (error) {
+      console.error('Error deleting activity:', error);
+      setToast({ message: 'Gagal hapus aktivitas', type: 'error' });
+    }
+  };
+
+  // EXPORT EXCEL dengan ExcelJS
+  const handleExportExcel = async () => {
+    setExportingExcel(true);
+    
+    try {
+      const exportLogs = await fetchActivitiesForExport();
+      
+      if (exportLogs.length === 0) {
+        setToast({ message: 'Tidak ada data untuk periode yang dipilih!', type: 'error' });
+        setExportingExcel(false);
+        return;
+      }
+      
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Laporan Aktivitas');
+      
+      worksheet.columns = [
+        { header: 'Tanggal', key: 'tanggal', width: 12 },
+        { header: 'Jam', key: 'jam', width: 10 },
+        { header: 'Kolam', key: 'kolam', width: 18 },
+        { header: 'User', key: 'user', width: 18 },
+        { header: 'Aktivitas', key: 'aktivitas', width: 22 },
+        { header: 'Pakan (Kg)', key: 'pakan', width: 12 },
+        { header: 'Jenis Pakan', key: 'jenis_pakan', width: 14 },
+        { header: 'Jumlah Mati', key: 'mati', width: 12 },
+        { header: 'Jumlah Sample', key: 'sample_count', width: 12 },
+        { header: 'Berat Sample (g)', key: 'sample_weight', width: 14 },
+        { header: 'Panjang Sample (cm)', key: 'sample_length', width: 14 },
+        { header: 'Nama Obat', key: 'obat', width: 14 },
+        { header: 'Dosis', key: 'dosis', width: 10 },
+        { header: 'Satuan Dosis', key: 'satuan', width: 12 },
+        { header: 'pH', key: 'ph', width: 8 },
+        { header: 'Suhu (°C)', key: 'suhu', width: 10 },
+        { header: 'DO (mg/L)', key: 'do', width: 10 },
+        { header: 'Amonia (ppm)', key: 'amonia', width: 12 },
+        { header: 'Catatan', key: 'catatan', width: 30 }
+      ];
+      
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF3B82F6' }
+      };
+      worksheet.getRow(1).font = { color: { argb: 'FFFFFFFF' }, bold: true };
+      
+      exportLogs.forEach(log => {
+        worksheet.addRow({
+          tanggal: new Date(log.created_at).toLocaleDateString('id-ID'),
+          jam: new Date(log.created_at).toLocaleTimeString('id-ID'),
+          kolam: log.pond_name,
+          user: log.user_name,
+          aktivitas: log.activity_type === 'WaterParameter' ? 'Parameter Air' :
+                     log.activity_type === 'Feeding' ? 'Pemberian Pakan' :
+                     log.activity_type === 'Mortality' ? 'Kematian Ikan' :
+                     log.activity_type === 'Sampling' ? 'Sampling Ikan' :
+                     log.activity_type === 'Medicine' ? 'Pemberian Obat' : log.activity_type,
+          pakan: log.activity_type === 'Feeding' ? log.amount : '-',
+          jenis_pakan: log.feed_type || '-',
+          mati: log.activity_type === 'Mortality' ? log.amount : '-',
+          sample_count: log.sample_count || '-',
+          sample_weight: log.sample_weight || '-',
+          sample_length: log.sample_length || '-',
+          obat: log.medicine_name || '-',
+          dosis: log.dose || '-',
+          satuan: log.dose_unit || '-',
+          ph: log.ph || '-',
+          suhu: log.temperature || '-',
+          do: log.dissolved_oxygen || '-',
+          amonia: log.ammonia || '-',
+          catatan: log.notes || '-'
+        });
+      });
+      
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      saveAs(blob, `Laporan_Aktivitas_${exportStartDate}_sd_${exportEndDate}.xlsx`);
+      
+      setToast({ message: 'Export Excel berhasil!', type: 'success' });
+      
+    } catch (error) {
+      console.error('Error exporting Excel:', error);
+      setToast({ message: 'Gagal mengekspor Excel', type: 'error' });
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
+  const handleExportPDF = () => setShowExportModal(true);
+
+  const confirmExport = async () => {
+    if (exportFormat === 'pdf') {
+      setExporting(true);
+      setShowExportModal(false);
+      
+      try {
+        const exportLogs = await fetchActivitiesForExport();
+        
+        if (exportLogs.length === 0) {
+          setToast({ message: 'Tidak ada data untuk periode yang dipilih!', type: 'error' });
+          setExporting(false);
+          return;
+        }
+        
+        const selectedPondFilter = ponds.find(p => p.id === exportPondId);
+        const pondName = exportPondId !== 'all' && selectedPondFilter 
+          ? selectedPondFilter.name 
+          : 'Semua Kolam';
+        const fishType = exportPondId !== 'all' && selectedPondFilter 
+          ? selectedPondFilter.fishType 
+          : undefined;
+        
+        await exportToPDF(exportLogs, exportStartDate, exportEndDate, pondName, fishType);
+        setToast({ message: 'Export PDF berhasil!', type: 'success' });
+        
+      } catch (error) {
+        console.error('Error exporting PDF:', error);
+        setToast({ message: 'Gagal mengekspor PDF: ' + (error as any).message, type: 'error' });
+      } finally {
+        setExporting(false);
+      }
+    } else {
+      await handleExportExcel();
+      setShowExportModal(false);
+    }
+  };
+
   const handleSaveLog = async () => {
     if (!selectedPondId || !selectedPond) {
-      alert("Pilih kolam terlebih dahulu!");
+      setToast({ message: 'Pilih kolam terlebih dahulu!', type: 'warning' });
       return;
     }
 
     setSubmitting(true);
 
     let criticalReason = "";
+    
+    let selectedDateTime;
+    if (isPondOwner(selectedPond.id)) {
+      selectedDateTime = new Date(activityDate + 'T12:00:00');
+    } else {
+      selectedDateTime = new Date();
+    }
+    
     let activityData: any = {
       pond_id: selectedPondId,
       user_id: user.id,
       activity_type: activeType,
       notes: catatanUmum,
-      created_at: new Date().toISOString()
+      created_at: selectedDateTime.toISOString()
     };
 
     if (activeType === 'Feeding') {
       if (!pakanKg || !pakanJenis) { 
-        alert("Lengkapi data pakan!"); 
+        setToast({ message: 'Lengkapi data pakan!', type: 'warning' });
         setSubmitting(false);
         return; 
       }
@@ -446,7 +498,7 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
 
     } else if (activeType === 'Mortality') {
       if (!matiJumlah) { 
-        alert("Lengkapi jumlah kematian!"); 
+        setToast({ message: 'Lengkapi jumlah kematian!', type: 'warning' });
         setSubmitting(false);
         return; 
       }
@@ -467,7 +519,7 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
 
     } else if (activeType === 'Medicine') {
       if (!obatNama) { 
-        alert("Lengkapi nama obat!"); 
+        setToast({ message: 'Lengkapi nama obat!', type: 'warning' });
         setSubmitting(false);
         return; 
       }
@@ -514,21 +566,21 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
         await broadcastDanger(selectedPond.name, selectedPondId, criticalReason.trim());
       }
 
-      // Reset form
       setPakanKg(''); setPakanJenis(''); setMatiJumlah('');
       setSampleJumlah(''); setSampleBerat(''); setSamplePanjang(''); 
       setObatNama(''); setObatDosis(''); 
       setAirPh(''); setAirSuhu(''); setAirDo(''); setAirAmonia('');
       setCatatanUmum('');
+      setActivityDate(new Date().toISOString().split('T')[0]);
 
       await fetchActivities();
       await fetchPonds();
 
-      alert('Catatan berhasil disimpan!');
+      setToast({ message: 'Catatan berhasil disimpan!', type: 'success' });
 
     } catch (error) {
       console.error('Error saving activity:', error);
-      alert('Gagal menyimpan catatan: ' + (error as any).message);
+      setToast({ message: 'Gagal menyimpan catatan: ' + (error as any).message, type: 'error' });
     } finally {
       setSubmitting(false);
     }
@@ -563,23 +615,91 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
     });
   };
 
+  const inputClass = "w-full bg-white/15 border-none rounded-2xl p-4 text-sm focus:bg-white/25 outline-none font-bold placeholder-white/50 transition-all focus:ring-0 focus:ring-transparent";
+  const selectClass = "w-full bg-white/15 border-none rounded-2xl p-4 text-sm focus:bg-white/25 outline-none font-bold text-white focus:ring-0 focus:ring-transparent";
+
+  const openEditModal = (log: ActivityLog) => {
+    setEditingLog(log);
+    const dateOnly = log.created_at.split('T')[0];
+    
+    if (log.activity_type === 'Feeding') {
+      setEditForm({
+        amount: log.amount || '',
+        feed_type: log.feed_type || '',
+        notes: log.notes || '',
+        created_at: dateOnly
+      });
+    } else if (log.activity_type === 'Mortality') {
+      setEditForm({
+        amount: log.amount || '',
+        notes: log.notes || '',
+        created_at: dateOnly
+      });
+    } else if (log.activity_type === 'Sampling') {
+      setEditForm({
+        sample_count: log.sample_count || '',
+        sample_weight: log.sample_weight || '',
+        sample_length: log.sample_length || '',
+        notes: log.notes || '',
+        created_at: dateOnly
+      });
+    } else if (log.activity_type === 'Medicine') {
+      setEditForm({
+        medicine_name: log.medicine_name || '',
+        dose: log.dose || '',
+        dose_unit: log.dose_unit || 'Gram',
+        notes: log.notes || '',
+        created_at: dateOnly
+      });
+    } else if (log.activity_type === 'WaterParameter') {
+      setEditForm({
+        ph: log.ph || '',
+        temperature: log.temperature || '',
+        dissolved_oxygen: log.dissolved_oxygen || '',
+        ammonia: log.ammonia || '',
+        notes: log.notes || '',
+        created_at: dateOnly
+      });
+    }
+    setShowEditModal(true);
+  };
+
   return (
     <div className="p-4 pb-24 space-y-6">
-      {/* Modal Pilih Range Tanggal */}
-      {showDatePicker && (
+      {toast && (
+        <Toast 
+          message={toast.message} 
+          type={toast.type} 
+          onClose={() => setToast(null)} 
+        />
+      )}
+
+      {/* Modal Export */}
+      {showExportModal && (
         <div className="fixed inset-0 z-[200] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6">
           <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden">
-            <div className="bg-blue-600 p-5 text-white text-center">
-              <i className="fas fa-calendar-alt text-3xl mb-2"></i>
-              <h3 className="font-black text-lg uppercase tracking-widest">Pilih Periode</h3>
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-5 text-white text-center">
+              <i className="fas fa-download text-3xl mb-2"></i>
+              <h3 className="font-black text-lg uppercase tracking-widest">Export Laporan</h3>
             </div>
             <div className="p-6 space-y-4">
+              <div>
+                <label className="text-[10px] font-black text-slate-600 uppercase ml-2">Pilih Kolam</label>
+                <select 
+                  value={exportPondId}
+                  onChange={e => setExportPondId(e.target.value)}
+                  className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 text-sm font-bold outline-none"
+                >
+                  <option value="all">🌊 Semua Kolam</option>
+                  {ponds.map(p => <option key={p.id} value={p.id}>🏠 {p.name}</option>)}
+                </select>
+              </div>
               <div>
                 <label className="text-[10px] font-black text-slate-600 uppercase ml-2">Dari Tanggal</label>
                 <input 
                   type="date" 
-                  value={startDate} 
-                  onChange={e => setStartDate(e.target.value)}
+                  value={exportStartDate} 
+                  onChange={e => setExportStartDate(e.target.value)}
                   className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 text-sm font-bold outline-none"
                 />
               </div>
@@ -587,24 +707,61 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
                 <label className="text-[10px] font-black text-slate-600 uppercase ml-2">Sampai Tanggal</label>
                 <input 
                   type="date" 
-                  value={endDate} 
-                  onChange={e => setEndDate(e.target.value)}
+                  value={exportEndDate} 
+                  onChange={e => setExportEndDate(e.target.value)}
                   className="w-full p-3 bg-slate-50 rounded-xl border border-slate-200 text-sm font-bold outline-none"
                 />
               </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-600 uppercase ml-2">Format Export</label>
+                <div className="flex gap-3 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setExportFormat('pdf')}
+                    className={`flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all flex items-center justify-center gap-2 ${
+                      exportFormat === 'pdf' 
+                        ? 'bg-red-600 text-white shadow-lg' 
+                        : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    <i className="fas fa-file-pdf"></i> PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExportFormat('excel')}
+                    className={`flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all flex items-center justify-center gap-2 ${
+                      exportFormat === 'excel' 
+                        ? 'bg-green-600 text-white shadow-lg' 
+                        : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    <i className="fas fa-file-excel"></i> Excel
+                  </button>
+                </div>
+              </div>
               <div className="flex gap-3 mt-4">
                 <button
-                  onClick={() => setShowDatePicker(false)}
+                  onClick={() => setShowExportModal(false)}
                   className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-black text-xs uppercase"
                 >
                   Batal
                 </button>
                 <button
                   onClick={confirmExport}
-                  disabled={exporting}
-                  className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-black text-xs uppercase shadow-lg"
+                  disabled={exporting || exportingExcel}
+                  className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-black text-xs uppercase shadow-lg flex items-center justify-center gap-2"
                 >
-                  {exporting ? 'Mengekspor...' : 'Export'}
+                  {(exporting || exportingExcel) ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      Mengekspor...
+                    </>
+                  ) : (
+                    <>
+                      <i className={`fas fa-${exportFormat === 'pdf' ? 'file-pdf' : 'file-excel'}`}></i>
+                      Export {exportFormat.toUpperCase()}
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -612,7 +769,126 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
         </div>
       )}
 
-      {/* Pilih Kolam & Export */}
+      {/* Modal Edit Aktivitas */}
+      {showEditModal && editingLog && (
+        <div className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-sm max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="bg-gradient-to-r from-amber-500 to-orange-500 p-4 text-white sticky top-0">
+              <div className="flex justify-between items-center">
+                <h3 className="font-black text-sm uppercase tracking-wider">Edit Aktivitas</h3>
+                <button onClick={() => setShowEditModal(false)} className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+                  <i className="fas fa-times"></i>
+                </button>
+              </div>
+              <p className="text-[10px] opacity-80 mt-1">
+                {editingLog.activity_type === 'Feeding' ? '🍚 Pemberian Pakan' :
+                 editingLog.activity_type === 'Mortality' ? '⚠️ Kematian Ikan' :
+                 editingLog.activity_type === 'Sampling' ? '🔬 Sampling Ikan' :
+                 editingLog.activity_type === 'Medicine' ? '💊 Pemberian Obat' :
+                 editingLog.activity_type === 'WaterParameter' ? '🌊 Parameter Air' : editingLog.activity_type}
+              </p>
+            </div>
+            
+            <div className="p-5 space-y-4">
+              {isPondOwner(editingLog.pond_id) && (
+                <div>
+                  <label className="text-[9px] font-black text-slate-500 uppercase">Tanggal Aktivitas</label>
+                  <input 
+                    type="date" 
+                    value={editForm.created_at || ''}
+                    onChange={e => setEditForm({...editForm, created_at: e.target.value})}
+                    className="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold outline-none"
+                  />
+                  <p className="text-[8px] text-slate-400 mt-1">Owner bisa mengubah tanggal aktivitas</p>
+                </div>
+              )}
+              
+              {editingLog.activity_type === 'Feeding' && (
+                <>
+                  <div>
+                    <label className="text-[9px] font-black text-slate-500 uppercase">Jumlah Pakan (Kg)</label>
+                    <input type="number" value={editForm.amount} onChange={e => setEditForm({...editForm, amount: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-black text-slate-500 uppercase">Jenis Pakan</label>
+                    <input type="text" value={editForm.feed_type} onChange={e => setEditForm({...editForm, feed_type: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold outline-none" />
+                  </div>
+                </>
+              )}
+
+              {editingLog.activity_type === 'Mortality' && (
+                <div>
+                  <label className="text-[9px] font-black text-slate-500 uppercase">Jumlah Mati (Ekor)</label>
+                  <input type="number" value={editForm.amount} onChange={e => setEditForm({...editForm, amount: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold outline-none" />
+                </div>
+              )}
+
+              {editingLog.activity_type === 'Sampling' && (
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-[8px] font-black text-slate-500 uppercase">Jumlah</label>
+                    <input type="number" value={editForm.sample_count} onChange={e => setEditForm({...editForm, sample_count: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-xs font-bold outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[8px] font-black text-slate-500 uppercase">Berat (g)</label>
+                    <input type="number" value={editForm.sample_weight} onChange={e => setEditForm({...editForm, sample_weight: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-xs font-bold outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[8px] font-black text-slate-500 uppercase">Panjang (cm)</label>
+                    <input type="number" value={editForm.sample_length} onChange={e => setEditForm({...editForm, sample_length: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-xs font-bold outline-none" />
+                  </div>
+                </div>
+              )}
+
+              {editingLog.activity_type === 'Medicine' && (
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2">
+                    <label className="text-[8px] font-black text-slate-500 uppercase">Nama Obat</label>
+                    <input type="text" value={editForm.medicine_name} onChange={e => setEditForm({...editForm, medicine_name: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-xs font-bold outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[8px] font-black text-slate-500 uppercase">Dosis</label>
+                    <input type="number" value={editForm.dose} onChange={e => setEditForm({...editForm, dose: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-xs font-bold outline-none" />
+                  </div>
+                  <div>
+                    <label className="text-[8px] font-black text-slate-500 uppercase">Satuan</label>
+                    <select value={editForm.dose_unit} onChange={e => setEditForm({...editForm, dose_unit: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-xs font-bold outline-none">
+                      <option value="Gram">Gram</option>
+                      <option value="Ml">Ml</option>
+                      <option value="PPM">PPM</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {editingLog.activity_type === 'WaterParameter' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-[8px] font-black text-slate-500 uppercase">pH</label><input type="number" step="0.1" value={editForm.ph} onChange={e => setEditForm({...editForm, ph: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-xs font-bold outline-none" /></div>
+                  <div><label className="text-[8px] font-black text-slate-500 uppercase">Suhu (°C)</label><input type="number" step="0.1" value={editForm.temperature} onChange={e => setEditForm({...editForm, temperature: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-xs font-bold outline-none" /></div>
+                  <div><label className="text-[8px] font-black text-slate-500 uppercase">DO (mg/L)</label><input type="number" step="0.1" value={editForm.dissolved_oxygen} onChange={e => setEditForm({...editForm, dissolved_oxygen: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-xs font-bold outline-none" /></div>
+                  <div><label className="text-[8px] font-black text-slate-500 uppercase">NH3 (ppm)</label><input type="number" step="0.01" value={editForm.ammonia} onChange={e => setEditForm({...editForm, ammonia: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-xs font-bold outline-none" /></div>
+                </div>
+              )}
+
+              <div>
+                <label className="text-[9px] font-black text-slate-500 uppercase">Catatan</label>
+                <textarea value={editForm.notes} onChange={e => setEditForm({...editForm, notes: e.target.value})} rows={2} className="w-full p-3 bg-slate-50 rounded-xl text-sm outline-none" />
+              </div>
+
+              <div className="flex gap-3 pt-3">
+                <button onClick={handleUpdateLog} disabled={submitting} className="flex-1 py-3 bg-amber-500 text-white rounded-xl font-black text-xs uppercase shadow-lg">
+                  {submitting ? 'Menyimpan...' : 'Simpan Perubahan'}
+                </button>
+                <button onClick={() => setShowEditModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-black text-xs uppercase">
+                  Batal
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pilih Kolam */}
       <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 space-y-4">
         <label className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] ml-2">Kolam Budidaya Aktif</label>
         <div className="relative">
@@ -622,34 +898,62 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
             className="w-full p-4 bg-slate-50 rounded-2xl border-none text-sm font-black text-slate-700 focus:ring-4 focus:ring-blue-50 outline-none appearance-none transition-all"
           >
             {ponds.length === 0 && <option value="">Tidak ada kolam</option>}
-            {ponds.map(p => <option key={p.id} value={p.id}>{p.name} ({p.fishType})</option>)}
+            {ponds.map(p => <option key={p.id} value={p.id}>🏠 {p.name} ({p.fishType})</option>)}
           </select>
           <i className="fas fa-chevron-down absolute right-5 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none"></i>
         </div>
-        
-        {/* Tombol Export PDF */}
-        <button 
-          onClick={handleExportPDF}
-          disabled={exporting}
-          className="w-full py-3 bg-red-600 text-white rounded-2xl font-black text-xs uppercase flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
-        >
-          <i className="fas fa-file-pdf"></i>
-          Export ke PDF
-        </button>
       </div>
+
+      {/* Tanggal Aktivitas Baru */}
+      {selectedPond && isPondOwner(selectedPond.id) && (
+        <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 space-y-4">
+          <label className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] ml-2">📅 Tanggal Aktivitas</label>
+          <div className="relative">
+            <input 
+              type="date" 
+              value={activityDate}
+              onChange={e => setActivityDate(e.target.value)}
+              className="w-full p-4 bg-slate-50 rounded-2xl border-none text-sm font-black text-slate-700 focus:ring-4 focus:ring-blue-50 outline-none transition-all"
+            />
+            <i className="fas fa-calendar-alt absolute right-5 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none"></i>
+          </div>
+          <p className="text-[8px] text-slate-400 ml-2">
+            <i className="fas fa-info-circle mr-1"></i>
+            Bisa pilih tanggal sebelumnya untuk mencatat aktivitas yang terlewat (backdate)
+          </p>
+        </div>
+      )}
+
+      {selectedPond && !isPondOwner(selectedPond.id) && (
+        <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 space-y-4">
+          <label className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em] ml-2">📅 Tanggal Aktivitas</label>
+          <div className="relative">
+            <input 
+              type="date" 
+              value={new Date().toISOString().split('T')[0]}
+              disabled
+              className="w-full p-4 bg-slate-100 rounded-2xl border-none text-sm font-black text-slate-500 outline-none cursor-not-allowed"
+            />
+            <i className="fas fa-calendar-alt absolute right-5 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none"></i>
+          </div>
+          <p className="text-[8px] text-amber-600 ml-2">
+            <i className="fas fa-lock mr-1"></i>
+            Staff hanya bisa mencatat aktivitas untuk hari ini
+          </p>
+        </div>
+      )}
 
       {/* Form Aktivitas */}
       <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-6 rounded-[3rem] text-white shadow-2xl space-y-6 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 blur-3xl"></div>
         
-        {/* Tab Aktivitas */}
         <div className="flex overflow-x-auto gap-2 p-1 bg-white/10 rounded-[1.5rem] no-scrollbar">
           {[
-            { type: 'Feeding', icon: 'fa-cookie-bite', label: 'Pakan' },
-            { type: 'Mortality', icon: 'fa-skull', label: 'Mati' },
-            { type: 'Sampling', icon: 'fa-vial', label: 'Sample' },
-            { type: 'Medicine', icon: 'fa-capsules', label: 'Obat' },
-            { type: 'WaterParameter', icon: 'fa-droplet', label: 'Parameter' }
+            { type: 'Feeding', icon: 'fa-cookie-bite', label: '🍚 Pakan' },
+            { type: 'Mortality', icon: 'fa-skull', label: '⚠️ Mati' },
+            { type: 'Sampling', icon: 'fa-vial', label: '🔬 Sample' },
+            { type: 'Medicine', icon: 'fa-capsules', label: '💊 Obat' },
+            { type: 'WaterParameter', icon: 'fa-droplet', label: '🌊 Parameter' }
           ].map(item => (
             <button
               key={item.type}
@@ -664,13 +968,12 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
           ))}
         </div>
 
-        {/* Form Input */}
-        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+        <div className="space-y-4">
           {activeType === 'Feeding' && (
             <div className="grid grid-cols-2 gap-3">
-              <input type="number" value={pakanKg} onChange={e => setPakanKg(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm focus:bg-white/25 outline-none font-bold placeholder-white/50 transition-all" placeholder="Jumlah (Kg)" />
-              <select value={pakanJenis} onChange={e => setPakanJenis(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm focus:bg-white/25 outline-none font-bold text-white">
-                <option value="" className="text-slate-800">Pilih Pakan</option>
+              <input type="number" value={pakanKg} onChange={e => setPakanKg(e.target.value)} className={inputClass} placeholder="🍚 Jumlah (Kg)" />
+              <select value={pakanJenis} onChange={e => setPakanJenis(e.target.value)} className={selectClass}>
+                <option value="" className="text-slate-800">📋 Pilih Pakan</option>
                 {(selectedPond?.customFeeds || ['LP-1', 'LP-2', 'LP-3']).map(f => (
                   <option key={f} value={f} className="text-slate-800">{f}</option>
                 ))}
@@ -680,23 +983,23 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
 
           {activeType === 'Mortality' && (
             <div className="grid grid-cols-1">
-              <input type="number" value={matiJumlah} onChange={e => setMatiJumlah(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm focus:bg-white/25 outline-none font-bold placeholder-white/50" placeholder="Jumlah Ikan Mati (Ekor)" />
+              <input type="number" value={matiJumlah} onChange={e => setMatiJumlah(e.target.value)} className={inputClass} placeholder="⚠️ Jumlah Ikan Mati (Ekor)" />
             </div>
           )}
 
           {activeType === 'Sampling' && (
             <div className="grid grid-cols-3 gap-2">
-              <input type="number" value={sampleJumlah} onChange={e => setSampleJumlah(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Qty" />
-              <input type="number" value={sampleBerat} onChange={e => setSampleBerat(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Gram" />
-              <input type="number" value={samplePanjang} onChange={e => setSamplePanjang(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Cm" />
+              <input type="number" value={sampleJumlah} onChange={e => setSampleJumlah(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="🔬 Jumlah" />
+              <input type="number" value={sampleBerat} onChange={e => setSampleBerat(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="⚖️ Gram" />
+              <input type="number" value={samplePanjang} onChange={e => setSamplePanjang(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="📏 Cm" />
             </div>
           )}
 
           {activeType === 'Medicine' && (
             <div className="grid grid-cols-3 gap-2">
-              <input type="text" value={obatNama} onChange={e => setObatNama(e.target.value)} className="col-span-1 bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Nama" />
-              <input type="number" value={obatDosis} onChange={e => setObatDosis(e.target.value)} className="col-span-1 bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="Dosis" />
-              <select value={obatSatuan} onChange={e => setObatSatuan(e.target.value)} className="col-span-1 bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold text-white">
+              <input type="text" value={obatNama} onChange={e => setObatNama(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="💊 Nama Obat" />
+              <input type="number" value={obatDosis} onChange={e => setObatDosis(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold placeholder-white/50" placeholder="💉 Dosis" />
+              <select value={obatSatuan} onChange={e => setObatSatuan(e.target.value)} className="bg-white/15 border-none rounded-2xl p-4 text-xs outline-none font-bold text-white">
                 <option value="Gram" className="text-slate-800">Gram</option>
                 <option value="Ml" className="text-slate-800">Ml</option>
                 <option value="PPM" className="text-slate-800">PPM</option>
@@ -707,33 +1010,31 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
           {activeType === 'WaterParameter' && (
             <div className="grid grid-cols-2 gap-2">
               <div className="relative">
-                <input type="number" step="0.1" value={airPh} onChange={e => setAirPh(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="pH Air" />
+                <input type="number" step="0.1" value={airPh} onChange={e => setAirPh(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="🧪 pH" />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] opacity-40 font-black">pH</span>
               </div>
               <div className="relative">
-                <input type="number" step="0.1" value={airSuhu} onChange={e => setAirSuhu(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="Suhu" />
+                <input type="number" step="0.1" value={airSuhu} onChange={e => setAirSuhu(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="🌡️ Suhu" />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] opacity-40 font-black">°C</span>
               </div>
               <div className="relative">
-                <input type="number" step="0.1" value={airDo} onChange={e => setAirDo(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="DO" />
+                <input type="number" step="0.1" value={airDo} onChange={e => setAirDo(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="💧 DO" />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] opacity-40 font-black">mg/L</span>
               </div>
               <div className="relative">
-                <input type="number" step="0.01" value={airAmonia} onChange={e => setAirAmonia(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="NH3" />
+                <input type="number" step="0.01" value={airAmonia} onChange={e => setAirAmonia(e.target.value)} className="w-full bg-white/15 border-none rounded-2xl p-4 text-sm outline-none font-bold placeholder-white/50" placeholder="☠️ NH3" />
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] opacity-40 font-black">ppm</span>
               </div>
             </div>
           )}
 
-          {/* Catatan */}
           <textarea 
             value={catatanUmum} 
             onChange={e => setCatatanUmum(e.target.value)} 
             className="w-full bg-white/15 border-none rounded-[1.8rem] p-5 text-sm focus:bg-white/25 outline-none font-bold h-24 placeholder-white/50 transition-all" 
-            placeholder="Catatan tambahan..." 
+            placeholder="📝 Catatan tambahan..." 
           />
 
-          {/* Tombol Simpan */}
           <button 
             onClick={handleSaveLog}
             disabled={submitting}
@@ -750,19 +1051,20 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
         </div>
       </div>
 
-      {/* Riwayat Aktivitas */}
+      {/* ==================== RIWAYAT AKTIVITAS ==================== */}
       <div className="space-y-4">
         <div className="flex justify-between items-center px-2">
-          <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Riwayat Aktivitas</h3>
+          <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+            📋 Riwayat Aktivitas
+          </h3>
           <button 
             onClick={() => setFilterDate(new Date().toISOString().split('T')[0])} 
             className="text-[8px] font-black text-blue-600 uppercase border border-blue-100 px-3 py-1 rounded-full"
           >
-            Hari Ini
+            📅 Hari Ini
           </button>
         </div>
         
-        {/* Filter */}
         <div className="grid grid-cols-2 gap-2 px-1">
           <input 
             type="date" 
@@ -775,12 +1077,11 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
             onChange={e => setFilterPondId(e.target.value)}
             className="p-3 bg-white rounded-xl border border-slate-100 text-[10px] font-black text-slate-700 outline-none"
           >
-            <option value="all">Semua Kolam</option>
-            {ponds.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            <option value="all">🌊 Semua Kolam</option>
+            {ponds.map(p => <option key={p.id} value={p.id}>🏠 {p.name}</option>)}
           </select>
         </div>
 
-        {/* List Aktivitas */}
         {loading ? (
           <div className="text-center py-10">
             <div className="w-10 h-10 border-4 border-blue-600/30 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
@@ -789,83 +1090,92 @@ const ActivityPage: React.FC<ActivityPageProps> = ({ user }) => {
         ) : logs.length === 0 ? (
           <div className="bg-white p-12 rounded-[2.5rem] border border-slate-100 text-center">
             <i className="fas fa-clipboard-list text-4xl text-slate-100 mb-4"></i>
-            <p className="text-slate-300 font-bold text-xs uppercase tracking-widest">Tidak ada catatan.</p>
+            <p className="text-slate-300 font-bold text-xs uppercase tracking-widest">Tidak ada catatan untuk tanggal ini.</p>
           </div>
         ) : (
           <div className="space-y-3">
-            {logs.map(log => (
-              <div key={log.id} className="bg-white p-5 rounded-3xl border border-slate-50 shadow-sm flex gap-4 animate-in fade-in slide-in-from-bottom-2">
-                <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 relative overflow-hidden logo-gradient text-white opacity-90">
-                  <div className="absolute inset-0 bg-white/10 flex items-center justify-center">
-                    <i className="fas fa-droplet text-white/30 text-xl absolute translate-y-0.5"></i>
+            {logs.map(log => {
+              const isOwner = isPondOwner(log.pond_id);
+              return (
+                <div key={log.id} className="bg-white p-5 rounded-3xl border border-slate-50 shadow-sm flex gap-4">
+                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 relative overflow-hidden bg-gradient-to-br from-blue-500 to-indigo-600 text-white opacity-90">
+                    <i className="fas fa-fish-fins text-white text-base relative z-10 transform -rotate-12"></i>
                   </div>
-                  <i className="fas fa-fish-fins text-white text-base relative z-10 transform -rotate-12"></i>
-                </div>
-                <div className="flex-1 space-y-1">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="text-[10px] font-black uppercase text-slate-800">
-                        {log.activity_type === 'WaterParameter' ? 'Parameter Air' : 
-                         log.activity_type === 'Feeding' ? 'Pakan' :
-                         log.activity_type === 'Mortality' ? 'Kematian' :
-                         log.activity_type === 'Sampling' ? 'Sampling' :
-                         log.activity_type === 'Medicine' ? 'Obat' : 
-                         log.activity_type === 'Stocking' ? 'Penambahan Ikan' : log.activity_type}
-                        <span className="ml-2 text-[8px] font-bold text-slate-400">
-                          {log.pond_name}
+                  <div className="flex-1 space-y-1">
+                    <div className="flex justify-between items-start flex-wrap gap-2">
+                      <div>
+                        <p className="text-[10px] font-black uppercase text-slate-800">
+                          {log.activity_type === 'WaterParameter' ? '🌊 Parameter Air' : 
+                           log.activity_type === 'Feeding' ? '🍚 Pemberian Pakan' :
+                           log.activity_type === 'Mortality' ? '⚠️ Kematian Ikan' :
+                           log.activity_type === 'Sampling' ? '🔬 Sampling Ikan' :
+                           log.activity_type === 'Medicine' ? '💊 Pemberian Obat' : log.activity_type}
+                          <span className="ml-2 text-[8px] font-bold text-slate-400">🏠 {log.pond_name}</span>
+                        </p>
+                        <p className="text-[8px] font-bold text-slate-400 mt-0.5">
+                          ⏰ {formatTime(log.created_at)} • 📅 {formatDate(log.created_at)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
+                          👤 {log.user_name}
                         </span>
-                      </p>
-                      <p className="text-[8px] font-bold text-slate-400 mt-0.5">
-                        {formatTime(log.created_at)} • {formatDate(log.created_at)}
-                      </p>
+                        {isOwner && (
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => openEditModal(log)}
+                              className="w-7 h-7 bg-amber-50 text-amber-600 rounded-lg flex items-center justify-center text-[10px] hover:bg-amber-100 transition-colors"
+                              title="Edit"
+                            >
+                              <i className="fas fa-edit"></i>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteLog(log.id)}
+                              className="w-7 h-7 bg-rose-50 text-rose-600 rounded-lg flex items-center justify-center text-[10px] hover:bg-rose-100 transition-colors"
+                              title="Hapus"
+                            >
+                              <i className="fas fa-trash"></i>
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
-                      {log.user_name}
-                    </span>
-                  </div>
 
-                  {log.activity_type === 'Feeding' && log.feed_type && (
-                    <p className="text-sm font-bold text-slate-700">
-                      {log.amount} kg {log.feed_type}
-                    </p>
-                  )}
-                  {log.activity_type === 'Mortality' && (
-                    <p className="text-sm font-bold text-slate-700">
-                      {log.amount} ekor mati
-                    </p>
-                  )}
-                  {log.activity_type === 'Sampling' && (
-                    <p className="text-sm font-bold text-slate-700">
-                      {log.sample_count} ekor • {log.sample_weight}g • {log.sample_length}cm
-                    </p>
-                  )}
-                  {log.activity_type === 'Medicine' && (
-                    <p className="text-sm font-bold text-slate-700">
-                      {log.medicine_name} {log.dose} {log.dose_unit}
-                    </p>
-                  )}
-                  {log.activity_type === 'WaterParameter' && (
-                    <p className="text-sm font-bold text-slate-700">
-                      pH: {log.ph || '-'} • Suhu: {log.temperature || '-'}°C • DO: {log.dissolved_oxygen || '-'} • NH3: {log.ammonia || '-'}
-                    </p>
-                  )}
-                  {log.activity_type === 'Stocking' && (
-                    <p className="text-sm font-bold text-slate-700">
-                      {log.amount} ekor ditambahkan
-                    </p>
-                  )}
-                  
-                  {log.notes && (
-                    <p className="text-[11px] text-slate-600 italic mt-1">
-                      "{log.notes}"
-                    </p>
-                  )}
+                    {log.activity_type === 'Feeding' && log.feed_type && (
+                      <p className="text-sm font-bold text-slate-700">🍚 {log.amount} kg {log.feed_type}</p>
+                    )}
+                    {log.activity_type === 'Mortality' && (
+                      <p className="text-sm font-bold text-slate-700">⚠️ {log.amount} ekor mati</p>
+                    )}
+                    {log.activity_type === 'Sampling' && (
+                      <p className="text-sm font-bold text-slate-700">🔬 {log.sample_count} ekor • ⚖️ {log.sample_weight}g • 📏 {log.sample_length}cm</p>
+                    )}
+                    {log.activity_type === 'Medicine' && (
+                      <p className="text-sm font-bold text-slate-700">💊 {log.medicine_name} 💉 {log.dose} {log.dose_unit}</p>
+                    )}
+                    {log.activity_type === 'WaterParameter' && (
+                      <p className="text-sm font-bold text-slate-700">🧪 pH: {log.ph || '-'} • 🌡️ {log.temperature || '-'}°C • 💧 DO: {log.dissolved_oxygen || '-'} • ☠️ NH3: {log.ammonia || '-'}</p>
+                    )}
+                    
+                    {log.notes && (
+                      <p className="text-[11px] text-slate-600 italic mt-1">📝 "{log.notes}"</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
+
+      {/* Tombol Export */}
+      <button 
+        onClick={handleExportPDF}
+        className="w-full py-4 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-2xl font-black text-sm uppercase flex items-center justify-center gap-3 active:scale-95 transition-all shadow-lg"
+      >
+        <i className="fas fa-download text-lg"></i>
+        Export Laporan (PDF/Excel)
+      </button>
     </div>
   );
 };

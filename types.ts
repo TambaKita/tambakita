@@ -1,11 +1,8 @@
-
 export enum NavTab {
-  Dashboard = 'Dashboard',
-  Activity = 'Aktifitas',
-  Calculator = 'Kalkulator',
-  Community = 'Diskusi Grup',
-  Profile = 'Profil Saya',
-  Messages = 'Pesan'
+  Dashboard = 'dashboard',
+  Activity = 'activity',
+  Calculator = 'calculator',
+  Profile = 'profile'
 }
 
 export interface User {
@@ -17,7 +14,9 @@ export interface User {
   city?: string;
   district?: string;
   village?: string;
+  avatar?: string;  // ← TAMBAHKAN INI untuk foto profil
   bio?: string;
+  role?: 'admin' | 'member';
 }
 
 export interface DirectMessage {

@@ -2,15 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { authService } from '../services/authService';
 import { User } from '../types';
 import { supabase } from '../src/lib/supabase';
-import CompleteProfilePage from './CompleteProfilePage';
 
 interface AuthPageProps {
   onAuthSuccess: (user: User) => void;
-}
-
-interface RegionItem {
-  id: string;
-  name: string;
 }
 
 type AuthMode = 'login' | 'signup' | 'forgot';
@@ -19,22 +13,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showCompleteProfile, setShowCompleteProfile] = useState(false);
-  const [tempUser, setTempUser] = useState<User | null>(null);
-
-  const [provinces, setProvinces] = useState<RegionItem[]>([]);
-  const [cities, setCities] = useState<RegionItem[]>([]);
-  const [districts, setDistricts] = useState<RegionItem[]>([]);
-  const [villages, setVillages] = useState<RegionItem[]>([]);
-  const [selectedProvince, setSelectedProvince] = useState('');
-  const [selectedCity, setSelectedCity] = useState('');
-  const [selectedDistrict, setSelectedDistrict] = useState('');
-  const [selectedVillage, setSelectedVillage] = useState('');
 
   const checkUserProfile = async (userId: string) => {
     const { data, error } = await supabase
@@ -58,20 +42,40 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         email: authUser.email,
         name: profile.name,
         phone: profile.phone,
-        province: profile.province,
-        city: profile.city,
-        district: profile.district,
-        village: profile.village
+        province: profile.province || '',
+        city: profile.city || '',
+        district: profile.district || '',
+        village: profile.village || '',
+        avatar: profile.avatar || ''
       };
       onAuthSuccess(fullUser);
     } else {
-      setTempUser({
+      // Jika profile belum lengkap, langsung simpan dengan data yang ada
+      const fullUser: User = {
         id: authUser.id,
         email: authUser.email,
-        name: '',
-        phone: ''
+        name: name || authUser.email?.split('@')[0] || 'User',
+        phone: phone || '',
+        province: '',
+        city: '',
+        district: '',
+        village: '',
+        avatar: ''
+      };
+      
+      // Simpan ke tabel profiles
+      await supabase.from('profiles').upsert({
+        id: authUser.id,
+        name: fullUser.name,
+        phone: fullUser.phone,
+        province: '',
+        city: '',
+        district: '',
+        village: '',
+        avatar: ''
       });
-      setShowCompleteProfile(true);
+      
+      onAuthSuccess(fullUser);
     }
   };
 
@@ -80,7 +84,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
       setLoading(true);
       setError('');
       
-      // Deteksi WebView APK
       const userAgent = navigator.userAgent;
       const isWebView = /Android/i.test(userAgent) && 
                         !/Chrome/i.test(userAgent) &&
@@ -118,68 +121,45 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
             id: session.user.id,
             email: session.user.email!,
             name: profile.name,
-            phone: profile.phone,
-            province: profile.province,
-            city: profile.city,
-            district: profile.district,
-            village: profile.village
+            phone: profile.phone || '',
+            province: profile.province || '',
+            city: profile.city || '',
+            district: profile.district || '',
+            village: profile.village || '',
+            avatar: profile.avatar || ''
           };
           onAuthSuccess(fullUser);
         } else {
-          setTempUser({
+          const fullUser: User = {
             id: session.user.id,
             email: session.user.email!,
-            name: '',
-            phone: ''
+            name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
+            phone: '',
+            province: '',
+            city: '',
+            district: '',
+            village: '',
+            avatar: ''
+          };
+          
+          await supabase.from('profiles').upsert({
+            id: session.user.id,
+            name: fullUser.name,
+            phone: '',
+            province: '',
+            city: '',
+            district: '',
+            village: '',
+            avatar: ''
           });
-          setShowCompleteProfile(true);
+          
+          onAuthSuccess(fullUser);
         }
       }
     });
 
     return () => subscription.unsubscribe();
   }, [onAuthSuccess]);
-
-  useEffect(() => {
-    if (mode === 'signup') {
-      fetch('https://www.emsifa.com/api-wilayah-indonesia/api/provinces.json')
-        .then(res => res.json())
-        .then(data => setProvinces(data));
-    }
-  }, [mode]);
-
-  useEffect(() => {
-    if (selectedProvince) {
-      fetch(`https://www.emsifa.com/api-wilayah-indonesia/api/regencies/${selectedProvince}.json`)
-        .then(res => res.json())
-        .then(data => {
-          setCities(data);
-          setDistricts([]);
-          setVillages([]);
-          setSelectedCity('');
-        });
-    }
-  }, [selectedProvince]);
-
-  useEffect(() => {
-    if (selectedCity) {
-      fetch(`https://www.emsifa.com/api-wilayah-indonesia/api/districts/${selectedCity}.json`)
-        .then(res => res.json())
-        .then(data => {
-          setDistricts(data);
-          setVillages([]);
-          setSelectedDistrict('');
-        });
-    }
-  }, [selectedCity]);
-
-  useEffect(() => {
-    if (selectedDistrict) {
-      fetch(`https://www.emsifa.com/api-wilayah-indonesia/api/villages/${selectedDistrict}.json`)
-        .then(res => res.json())
-        .then(data => setVillages(data));
-    }
-  }, [selectedDistrict]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -192,24 +172,27 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
         const user = await authService.login(email, password);
         await handleAuthSuccess(user);
       } else if (mode === 'signup') {
-        if (!name || !phone || !selectedProvince || !selectedCity) {
-          throw new Error('Mohon lengkapi semua data pendaftaran');
+        if (!name) {
+          throw new Error('Nama lengkap harus diisi');
         }
         
-        const provinceName = provinces.find(p => p.id === selectedProvince)?.name || '';
-        const cityName = cities.find(c => c.id === selectedCity)?.name || '';
-        const districtName = districts.find(d => d.id === selectedDistrict)?.name || '';
-        const villageName = villages.find(v => v.id === selectedVillage)?.name || '';
+        if (password !== confirmPassword) {
+          throw new Error('Password dan konfirmasi password tidak cocok!');
+        }
+        
+        if (password.length < 6) {
+          throw new Error('Password minimal 6 karakter!');
+        }
 
         const user = await authService.signup({
           email,
           password,
           name,
-          phone,
-          province: provinceName,
-          city: cityName,
-          district: districtName,
-          village: villageName
+          phone: phone || '',
+          province: '',
+          city: '',
+          district: '',
+          village: ''
         });
         onAuthSuccess(user);
       } else if (mode === 'forgot') {
@@ -222,10 +205,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
       setLoading(false);
     }
   };
-
-  if (showCompleteProfile && tempUser) {
-    return <CompleteProfilePage user={tempUser} onComplete={onAuthSuccess} />;
-  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-[#f8fafc]">
@@ -271,13 +250,14 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="w-full pl-14 pr-6 py-4 bg-slate-50 border-none rounded-[1.2rem] focus:ring-2 focus:ring-blue-500/20 focus:bg-white outline-none transition-all font-bold text-sm"
-                    placeholder="Nama Terang"
+                    placeholder="Nama Lengkap"
+                    required
                   />
                 </div>
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-blue-600 uppercase ml-2 tracking-widest">Nomor WhatsApp</label>
+                <label className="text-[10px] font-black text-blue-600 uppercase ml-2 tracking-widest">Nomor WhatsApp (Opsional)</label>
                 <div className="relative group">
                   <i className="fab fa-whatsapp absolute left-5 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-green-500 transition-colors"></i>
                   <input
@@ -285,7 +265,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     className="w-full pl-14 pr-6 py-4 bg-slate-50 border-none rounded-[1.2rem] focus:ring-2 focus:ring-blue-500/20 focus:bg-white outline-none transition-all font-bold text-sm"
-                    placeholder="0812xxxxxx"
+                    placeholder="0812xxxxxx (opsional)"
                   />
                 </div>
               </div>
@@ -317,72 +297,39 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full pl-14 pr-6 py-4 bg-slate-50 border-none rounded-[1.2rem] focus:ring-2 focus:ring-blue-500/20 focus:bg-white outline-none transition-all font-bold text-sm"
-                  placeholder="••••••••"
+                  placeholder="Minimal 6 karakter"
                   required
                 />
               </div>
-              {mode === 'login' && (
-                <div className="text-right px-2">
-                   <button 
-                    type="button"
-                    onClick={() => setMode('forgot')}
-                    className="text-[10px] font-black text-blue-600 uppercase tracking-widest"
-                   >
-                    Lupa Password?
-                   </button>
-                </div>
-              )}
             </div>
           )}
 
           {mode === 'signup' && (
-            <div className="pt-2 space-y-4">
-              <div className="flex items-center gap-2 mb-2 px-2">
-                <span className="h-[1px] flex-1 bg-gray-100"></span>
-                <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest">Lokasi Tambak</span>
-                <span className="h-[1px] flex-1 bg-gray-100"></span>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-blue-600 uppercase ml-2 tracking-widest">Konfirmasi Password</label>
+              <div className="relative group">
+                <i className="fas fa-lock absolute left-5 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-blue-500 transition-colors"></i>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full pl-14 pr-6 py-4 bg-slate-50 border-none rounded-[1.2rem] focus:ring-2 focus:ring-blue-500/20 focus:bg-white outline-none transition-all font-bold text-sm"
+                  placeholder="Ulangi password"
+                  required
+                />
               </div>
+            </div>
+          )}
 
-              <div className="space-y-3">
-                <select 
-                  value={selectedProvince} 
-                  onChange={(e) => setSelectedProvince(e.target.value)}
-                  className="w-full px-5 py-4 bg-slate-50 border-none rounded-[1.2rem] focus:ring-2 focus:ring-blue-500/20 focus:bg-white outline-none transition-all font-bold text-sm text-gray-700"
-                >
-                  <option value="">Provinsi</option>
-                  {provinces.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-
-                <select 
-                  value={selectedCity} 
-                  disabled={!selectedProvince}
-                  onChange={(e) => setSelectedCity(e.target.value)}
-                  className="w-full px-5 py-4 bg-slate-50 border-none rounded-[1.2rem] focus:ring-2 focus:ring-blue-500/20 focus:bg-white outline-none transition-all font-bold text-sm text-gray-700 disabled:opacity-50"
-                >
-                  <option value="">Kota/Kabupaten</option>
-                  {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-
-                <select 
-                  value={selectedDistrict} 
-                  disabled={!selectedCity}
-                  onChange={(e) => setSelectedDistrict(e.target.value)}
-                  className="w-full px-5 py-4 bg-slate-50 border-none rounded-[1.2rem] focus:ring-2 focus:ring-blue-500/20 focus:bg-white outline-none transition-all font-bold text-sm text-gray-700 disabled:opacity-50"
-                >
-                  <option value="">Kecamatan</option>
-                  {districts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
-
-                <select 
-                  value={selectedVillage} 
-                  disabled={!selectedDistrict}
-                  onChange={(e) => setSelectedVillage(e.target.value)}
-                  className="w-full px-5 py-4 bg-slate-50 border-none rounded-[1.2rem] focus:ring-2 focus:ring-blue-500/20 focus:bg-white outline-none transition-all font-bold text-sm text-gray-700 disabled:opacity-50"
-                >
-                  <option value="">Kelurahan/Desa</option>
-                  {villages.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                </select>
-              </div>
+          {mode === 'login' && (
+            <div className="text-right px-2">
+              <button 
+                type="button"
+                onClick={() => setMode('forgot')}
+                className="text-[10px] font-black text-blue-600 uppercase tracking-widest"
+              >
+                Lupa Password?
+              </button>
             </div>
           )}
 
@@ -445,7 +392,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onAuthSuccess }) => {
               Kembali ke Masuk
             </button>
           ) : (
-            <button onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); setSuccess(''); }} className="text-xs font-bold text-slate-400 hover:text-blue-600 transition-colors">
+            <button onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); setSuccess(''); setConfirmPassword(''); }} className="text-xs font-bold text-slate-400 hover:text-blue-600 transition-colors">
               {mode === 'login' ? 'Ingin bergabung? ' : 'Sudah ada akun? '}
               <span className="text-blue-600 font-black">{mode === 'login' ? 'Daftar Baru' : 'Masuk'}</span>
             </button>

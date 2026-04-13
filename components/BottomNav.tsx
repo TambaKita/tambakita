@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { NavTab } from '../types';
 
@@ -12,7 +11,6 @@ const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onTabChange }) => {
     { id: NavTab.Dashboard, icon: 'fa-chart-pie', label: 'Dashboard' },
     { id: NavTab.Activity, icon: 'fa-calendar-check', label: 'Harian' },
     { id: NavTab.Calculator, icon: 'fa-calculator', label: 'Kalkulator' },
-    { id: NavTab.Community, icon: 'fa-users', label: 'Diskusi' },
   ];
 
   return (
